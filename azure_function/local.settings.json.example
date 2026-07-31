@@ -1,0 +1,14 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+
+    "_comment": "En dev local, pointer directement sur le dossier models/ du dépôt :",
+    "MODELS_DIR": "../models",
+
+    "_comment2": "En prod, laisser MODELS_DIR vide et renseigner Blob :",
+    "AZURE_STORAGE_CONNECTION_STRING": "",
+    "MODELS_CONTAINER": "models"
+  }
+}

@@ -1,0 +1,4 @@
+# Dépendances de l'Azure Function — volontairement minimales (démarrage rapide).
+azure-functions
+numpy>=1.24
+azure-storage-blob>=12.19

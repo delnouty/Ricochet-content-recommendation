@@ -1,0 +1,43 @@
+# Données brutes et volumineuses (à télécharger, jamais versionnées)
+data/raw/
+data/*.csv
+data/*.pickle
+data/*.pkl
+data/*.npy
+data/*.zip
+dta/news-portal-user
+
+# Artefacts de modèle générés (peuvent être régénérés / poussés vers Blob)
+models/
+!models/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.ipynb_checkpoints/
+
+# Azure Functions
+azure_function/local.settings.json
+azure_function/.python_packages/
+azure_function/bin/
+azure_function/obj/
+
+# Secrets / config locale
+.env
+*.env
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Downloaded dataset (actual folder used by the notebook)
+data/news-portal-user/
+*.zip
+
+# Claude Code local settings
+.claude/settings.local.json
