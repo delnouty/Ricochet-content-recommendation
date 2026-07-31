@@ -5,8 +5,12 @@ légers, chargés ensuite par `Recommender` (et par l'Azure Function) :
 
   - articles_embeddings_pca.npy : embeddings réduits par ACP (astuce de Julien
     pour tenir dans les limites du free tier Azure) ;
+  - pca_mean.npy / pca_components.npy : la projection ACP elle-même, nécessaire
+    pour intégrer un **nouvel article** sans réajuster l'ACP (project_embeddings) ;
   - user_clicks.pkl             : dict user_id -> np.ndarray des article_id lus ;
   - popular_articles.npy        : article_id triés par popularité (cold start) ;
+  - popular_by_region.pkl       : popularité **par région**, pour un cold start
+    contextuel (un nouveau lecteur reçoit ce qui marche dans sa région) ;
   - cf_*.npy / cf_*.pkl         : facteurs ALS du filtrage collaboratif.
 
 Usage :
@@ -23,6 +27,19 @@ import numpy as np
 import pandas as pd
 
 
+CLICK_COLUMNS = ["user_id", "click_article_id", "click_timestamp"]
+CONTEXT_COLUMNS = ["click_region"]  # contexte exploité pour le cold start
+
+
+def _read_clicks_csv(path: Path) -> pd.DataFrame:
+    """Lit un CSV de clics, avec le contexte lorsqu'il est présent."""
+    try:
+        return pd.read_csv(path, usecols=CLICK_COLUMNS + CONTEXT_COLUMNS)
+    except ValueError:
+        # Fichier sans colonne de contexte : on se limite au strict nécessaire.
+        return pd.read_csv(path, usecols=CLICK_COLUMNS)
+
+
 def load_clicks(data_dir: Path) -> pd.DataFrame:
     """Charge tous les clics depuis un dossier `clicks/` ou un CSV échantillon."""
     clicks_dir = data_dir / "clicks"
@@ -30,13 +47,12 @@ def load_clicks(data_dir: Path) -> pd.DataFrame:
         files = sorted(clicks_dir.glob("clicks_hour_*.csv"))
         if not files:
             raise FileNotFoundError(f"Aucun fichier clicks_hour_*.csv dans {clicks_dir}")
-        frames = [pd.read_csv(f, usecols=["user_id", "click_article_id", "click_timestamp"])
-                  for f in files]
+        frames = [_read_clicks_csv(f) for f in files]
         return pd.concat(frames, ignore_index=True)
 
     sample = data_dir / "clicks_sample.csv"
     if sample.exists():
-        return pd.read_csv(sample, usecols=["user_id", "click_article_id", "click_timestamp"])
+        return _read_clicks_csv(sample)
 
     raise FileNotFoundError(
         f"Ni {clicks_dir} ni {sample} trouvés. Voir data/README.md pour l'arborescence."
@@ -44,7 +60,17 @@ def load_clicks(data_dir: Path) -> pd.DataFrame:
 
 
 def build_embeddings_pca(data_dir: Path, out_dir: Path, n_components: int) -> np.ndarray:
-    """Réduit la matrice d'embeddings par ACP et la sérialise."""
+    """Réduit la matrice d'embeddings par ACP et sérialise **aussi la projection**.
+
+    Trois fichiers sont produits :
+      - `articles_embeddings_pca.npy` : le catalogue réduit, lu à l'inférence ;
+      - `pca_mean.npy` + `pca_components.npy` : la projection elle-même.
+
+    Sauvegarder la projection est ce qui rend l'**ajout d'un nouvel article**
+    possible : on projette son embedding dans la base existante
+    (`project_embeddings`). Sans elle, il faudrait réajuster l'ACP — donc changer
+    de base et recalculer les vecteurs de tout le catalogue.
+    """
     from sklearn.decomposition import PCA
 
     with open(data_dir / "articles_embeddings.pickle", "rb") as f:
@@ -52,13 +78,40 @@ def build_embeddings_pca(data_dir: Path, out_dir: Path, n_components: int) -> np
     emb = np.asarray(emb, dtype=np.float32)
 
     n_components = min(n_components, emb.shape[1])
-    reduced = PCA(n_components=n_components, random_state=42).fit_transform(emb)
-    reduced = reduced.astype(np.float32)
+    pca = PCA(n_components=n_components, random_state=42)
+    reduced = pca.fit_transform(emb).astype(np.float32)
 
     np.save(out_dir / "articles_embeddings_pca.npy", reduced)
+    np.save(out_dir / "pca_mean.npy", pca.mean_.astype(np.float32))
+    np.save(out_dir / "pca_components.npy", pca.components_.astype(np.float32))
     print(f"[embeddings] {emb.shape} -> ACP {reduced.shape} "
           f"(~{reduced.nbytes / 1e6:.1f} Mo)")
+    print(f"[pca] projection sauvegardée : {n_components} composantes, "
+          f"{pca.explained_variance_ratio_.sum():.1%} de variance expliquée")
     return reduced
+
+
+def project_embeddings(embeddings: np.ndarray, models_dir: Path) -> np.ndarray:
+    """Projette des embeddings bruts (250 dim) dans l'espace ACP existant (50 dim).
+
+    Chemin d'intégration d'un **nouvel article** : calculer son embedding, le
+    projeter ici, puis l'ajouter à `articles_embeddings_pca.npy`. L'ACP n'est pas
+    réajustée : la base reste celle des articles déjà en place, donc leurs vecteurs
+    (et tout index construit dessus) restent valides.
+
+    Ne dépend que de numpy — utilisable dans une fonction d'ingestion sans
+    embarquer scikit-learn.
+    """
+    mean = np.load(models_dir / "pca_mean.npy")
+    components = np.load(models_dir / "pca_components.npy")
+
+    x = np.atleast_2d(np.asarray(embeddings, dtype=np.float32))
+    if x.shape[1] != mean.size:
+        raise ValueError(
+            f"embeddings de dimension {x.shape[1]}, attendu {mean.size} "
+            "(dimension d'origine du catalogue)"
+        )
+    return ((x - mean) @ components.T).astype(np.float32)
 
 
 def build_user_artifacts(clicks: pd.DataFrame, out_dir: Path) -> None:
@@ -77,6 +130,38 @@ def build_user_artifacts(clicks: pd.DataFrame, out_dir: Path) -> None:
     popular = (clicks["click_article_id"].value_counts().index.to_numpy().astype(np.int64))
     np.save(out_dir / "popular_articles.npy", popular)
     print(f"[popular_articles] {popular.size} articles classés")
+
+
+def build_segment_popularity(clicks: pd.DataFrame, out_dir: Path,
+                             min_clicks: int = 30) -> None:
+    """Classement de popularité **par région**, pour un cold start contextuel.
+
+    Sans contexte, tout nouveau lecteur reçoit le même top-5 mondial. Avec la
+    région, il reçoit ce que lisent les lecteurs de sa région — la seule
+    information disponible sur un utilisateur dont on ne sait rien d'autre.
+
+    `min_clicks` écarte les régions trop peu représentées : un classement établi
+    sur une poignée de clics est du bruit, mieux vaut retomber sur le global.
+    Les régions sont des codes anonymisés (entiers) : c'est le système qui segmente,
+    aucun libellé n'est nécessaire.
+    """
+    if "click_region" not in clicks.columns:
+        print("[popular_by_region] colonne click_region absente -> ignoré")
+        return
+
+    by_region: dict[int, np.ndarray] = {}
+    skipped = 0
+    for region, group in clicks.groupby("click_region"):
+        if len(group) < min_clicks:
+            skipped += 1
+            continue
+        ranking = group["click_article_id"].value_counts().index.to_numpy().astype(np.int64)
+        by_region[int(region)] = ranking
+
+    with open(out_dir / "popular_by_region.pkl", "wb") as f:
+        pickle.dump(by_region, f, protocol=pickle.HIGHEST_PROTOCOL)
+    print(f"[popular_by_region] {len(by_region)} région(s) retenue(s) "
+          f"(≥ {min_clicks} clics), {skipped} écartée(s)")
 
 
 def build_collaborative(clicks: pd.DataFrame, out_dir: Path, factors: int) -> None:
@@ -121,6 +206,8 @@ def main() -> None:
     parser.add_argument("--out-dir", default="models", type=Path)
     parser.add_argument("--pca", default=50, type=int, help="dimensions après ACP")
     parser.add_argument("--factors", default=50, type=int, help="facteurs latents ALS")
+    parser.add_argument("--min-region-clicks", default=30, type=int,
+                        help="clics minimum pour retenir une région (cold start contextuel)")
     args = parser.parse_args()
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -129,6 +216,7 @@ def main() -> None:
     clicks = load_clicks(args.data_dir)
     print(f"[clicks] {len(clicks):,} interactions chargées")
     build_user_artifacts(clicks, args.out_dir)
+    build_segment_popularity(clicks, args.out_dir, args.min_region_clicks)
     build_collaborative(clicks, args.out_dir, args.factors)
     print("\nArtefacts prêts dans", args.out_dir.resolve())
 

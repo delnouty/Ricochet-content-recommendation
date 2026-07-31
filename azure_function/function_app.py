@@ -5,6 +5,8 @@ Endpoint HTTP : GET/POST /api/recommend
     - user_id (int, requis)
     - n       (int, défaut 5)
     - method  (str, défaut "hybrid" ; "content" | "collab" | "hybrid")
+    - region  (int, optionnel) : code de région, utilisé uniquement pour le cold
+              start (un lecteur inconnu reçoit la popularité de sa région)
 
 Réponse JSON :
     {"user_id": 123, "method": "hybrid", "recommendations": [id1, ..., id5]}
@@ -68,8 +70,18 @@ def recommend(req: func.HttpRequest) -> func.HttpResponse:
 
     method = (_param(req, "method", body) or "hybrid").lower()
 
+    # Région (code anonymisé) : n'affecte que le cold start.
+    raw_region = _param(req, "region", body)
     try:
-        recs = _get_recommender().recommend(user_id, n=n, method=method)
+        region = int(raw_region) if raw_region not in (None, "") else None
+    except (TypeError, ValueError):
+        return func.HttpResponse(
+            json.dumps({"error": "'region' doit être un entier"}),
+            status_code=400, mimetype="application/json",
+        )
+
+    try:
+        recs = _get_recommender().recommend(user_id, n=n, method=method, region=region)
     except ValueError as exc:  # method inconnue
         return func.HttpResponse(
             json.dumps({"error": str(exc)}),

@@ -29,12 +29,32 @@ streamlit run local/app.py
 
 Aucune configuration n'est nécessaire si `models/` est présent à la racine.
 
+## Inscrire un client et le recommander
+
+Onglet **Nouveau client** : nom + centres d'intérêt (catégories) → le client reçoit
+un `user_id` (à partir de 1 000 000) et un profil de départ constitué des articles
+les plus récents de ces catégories.
+
+Onglet **Recommandations** : sélectionnez-le, puis le bouton **Lu** en face d'une
+recommandation enregistre la lecture. Le profil s'enrichit, les recommandations
+changent — sans aucun ré-entraînement, le content-based n'ayant besoin que d'un
+historique.
+
+Les clients et leurs lectures sont stockés dans `local/clients.db` (SQLite,
+bibliothèque standard), donc ils survivent au redémarrage. Ce fichier n'est pas
+versionné.
+
+Un client inscrit est **absent des facteurs ALS** : le collaboratif l'ignore et
+retombe sur le contenu jusqu'au prochain ré-entraînement (`src/prepare_model.py`).
+L'application l'indique explicitement.
+
 ## Configuration optionnelle
 
 | Variable | Rôle | Défaut |
 |---|---|---|
 | `MODELS_DIR` | dossier des artefacts | `../models`, puis `./models` |
 | `DATA_DIR` | dossier contenant `articles_metadata.csv`, pour afficher catégorie / longueur / date de publication | `data/raw/`, puis `data/news-portal-user/` |
+| `CLIENTS_DB` | base SQLite des clients inscrits | `local/clients.db` |
 
 Sans `articles_metadata.csv`, l'application affiche les identifiants d'articles :
 c'est un enrichissement d'affichage, pas une dépendance.

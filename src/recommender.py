@@ -48,6 +48,13 @@ class Recommender:
         # Articles les plus populaires (article_id triés par popularité décroissante).
         self.popular_articles = np.load(self.models_dir / "popular_articles.npy")
 
+        # Popularité par région : cold start contextuel (artefact optionnel).
+        self.popular_by_region: dict[int, np.ndarray] = {}
+        region_file = self.models_dir / "popular_by_region.pkl"
+        if region_file.exists():
+            with open(region_file, "rb") as f:
+                self.popular_by_region = pickle.load(f)
+
         # --- Collaborative filtering (facteurs ALS pré-entraînés) ------------
         self._has_cf = (self.models_dir / "cf_item_factors.npy").exists()
         if self._has_cf:
@@ -134,11 +141,17 @@ class Recommender:
         return self._top_n(combined, seen, n)
 
     # ----------------------------------------------------------------- public
-    def recommend(self, user_id: int, n: int = 5, method: str = "hybrid") -> list[int]:
+    def recommend(self, user_id: int, n: int = 5, method: str = "hybrid",
+                  region: int | None = None) -> list[int]:
         """Renvoie `n` article_id recommandés pour `user_id`.
 
         method ∈ {"content", "collab", "hybrid"}. En l'absence d'historique
         exploitable, bascule automatiquement sur les articles populaires.
+
+        `region` (code anonymisé, optionnel) n'intervient que dans ce repli : un
+        lecteur dont on ne sait rien reçoit alors la popularité **de sa région**
+        plutôt que la popularité mondiale. Ignoré dès qu'un historique existe, le
+        contenu étant un signal bien plus fort.
         """
         dispatch = {
             "content": self._content_based,
@@ -151,12 +164,32 @@ class Recommender:
         result = dispatch[method](user_id, n)
         if result:
             return result
-        return self._popularity_fallback(user_id, n)
+        return self._popularity_fallback(user_id, n, region)
 
-    def _popularity_fallback(self, user_id: int, n: int) -> list[int]:
+    def _popularity_fallback(self, user_id: int, n: int,
+                             region: int | None = None) -> list[int]:
+        """Articles populaires, si possible ceux de la région de l'utilisateur."""
         seen = set(self._seen(user_id).tolist())
-        out = [int(a) for a in self.popular_articles if a not in seen]
+        ranking = self._region_ranking(region, n, seen)
+        if ranking is None:
+            ranking = self.popular_articles
+        out = [int(a) for a in ranking if a not in seen]
         return out[:n]
+
+    def _region_ranking(self, region: int | None, n: int,
+                        seen: set[int]) -> np.ndarray | None:
+        """Classement régional s'il est exploitable, sinon None.
+
+        Un classement régional trop court après exclusion des articles déjà lus
+        donnerait moins de `n` résultats : on préfère alors le classement global.
+        """
+        if region is None:
+            return None
+        ranking = self.popular_by_region.get(int(region))
+        if ranking is None:
+            return None
+        available = sum(1 for a in ranking if a not in seen)
+        return ranking if available >= n else None
 
 
 def _minmax(x: np.ndarray) -> np.ndarray:

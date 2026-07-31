@@ -8,6 +8,7 @@ avec le seul environnement virtuel du dépôt.
 Le contrat est identique à `azure_function/function_app.py` :
 
     GET/POST /api/recommend?user_id=<int>&n=<int>&method=<content|collab|hybrid>
+                           [&region=<int>]
     -> {"user_id": 0, "method": "hybrid", "recommendations": [id1, ..., id5]}
 
 Mêmes codes d'erreur (400 sur paramètre manquant / non entier / méthode
@@ -106,8 +107,14 @@ class _Handler(BaseHTTPRequestHandler):
 
         method = str(params.get("method") or "hybrid").lower()
 
+        raw_region = params.get("region")
         try:
-            recs = self.recommender.recommend(user_id, n=n, method=method)
+            region = int(raw_region) if raw_region not in (None, "") else None
+        except (TypeError, ValueError):
+            return self._json(400, {"error": "'region' doit être un entier"})
+
+        try:
+            recs = self.recommender.recommend(user_id, n=n, method=method, region=region)
         except ValueError as exc:  # method inconnue
             return self._json(400, {"error": str(exc)})
         except Exception:  # noqa: BLE001

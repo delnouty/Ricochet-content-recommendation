@@ -25,6 +25,10 @@ azure_function/.python_packages/
 azure_function/bin/
 azure_function/obj/
 
+# Base des clients inscrits localement (données d'usage, jamais versionnées)
+local/clients.db
+*.db
+
 # Secrets / config locale
 .env
 *.env

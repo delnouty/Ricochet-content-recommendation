@@ -70,6 +70,7 @@ articles): [docs/architecture.md](docs/architecture.md).
 ├── scripts/
 │   ├── serve_local.py       # local endpoint, same contract as the Function (no Core Tools)
 │   ├── run_local.ps1        # one-command local stack: endpoint + Streamlit app
+│   ├── add_articles.py      # integrates new articles — projection, no retraining
 │   └── sync_recommender.py  # regenerates the deployed copies of the core
 ├── tests/                   # unit tests on synthetic artifacts
 ├── docs/                    # architecture, presentation, GxP/CSV pack
@@ -95,6 +96,12 @@ python -m src.prepare_model --data-dir data/raw --out-dir models --pca 50 --fact
 Produces `articles_embeddings_pca.npy`, `user_clicks.pkl`, `popular_articles.npy` and the
 `cf_*` ALS factors. If `implicit` is not installed the collaborative step is skipped with a
 warning instead of failing — `collab`/`hybrid` then degrade gracefully.
+
+It also writes `pca_mean.npy` + `pca_components.npy` (~51 KB): the PCA projection itself,
+without which a **new article** could not be placed in the reduced space without refitting
+the PCA over the whole catalogue and invalidating every stored vector. `project_embeddings()`
+uses them to embed a new article in minutes, numpy-only — see
+[docs/architecture.md](docs/architecture.md) §4.b.
 
 ### 3. Run the local solution — no cloud, no HTTP
 
@@ -177,6 +184,32 @@ Response: `{"user_id": 0, "method": "hybrid", "recommendations": [id1, …, id5]
 Errors: `400` on a missing/non-integer `user_id` or an unknown `method`, `500` on an
 internal failure. The recommender is instantiated once per worker and reused.
 
+## Adding new articles (no retraining)
+
+A newly published article must be recommendable without rebuilding anything. Because the
+PCA projection is persisted, its 250-dim embedding can be placed in the existing 50-dim
+basis directly:
+
+```powershell
+python scripts/add_articles.py --embeddings nouveaux.npy --dry-run   # preview ids
+python scripts/add_articles.py --embeddings nouveaux.npy             # integrate
+```
+
+Accepts `.npy` or `.pickle` holding an `(n, 250)` matrix. It projects, appends to
+`articles_embeddings_pca.npy` with an **atomic write**, and prints the assigned
+`article_id`s — which are the catalogue row indices. Re-running is refused if the same
+vectors are already present (row fingerprints), so a repeated run can't silently duplicate
+articles; override with `--allow-duplicates`.
+
+What it deliberately leaves alone: `popular_articles.npy` (an article with no clicks has no
+popularity — it surfaces through content similarity only) and `articles_metadata.csv` (source
+data, not an artifact, so apps show `Article #<id>` until it's updated). Restart the app
+afterwards, and re-publish `models/` to Blob or the HF Hub for those two solutions.
+
+Verified on the real catalogue: three added articles took ids 364047–364049 and entered a
+matching user's top-5 immediately, with no model retrained. Rationale and the scheduled
+PCA refit that bounds this approach: [docs/architecture.md](docs/architecture.md) §4.b.
+
 ## Evaluation
 
 Offline **leave-last-out** protocol (notebook section 4): for every user with enough
@@ -199,7 +232,9 @@ python -m pytest tests/ -q
 
 Coverage: content-based / collaborative / hybrid ranking, exclusion of already-seen
 articles, popularity fallback on cold start, robustness (invalid method, `n` larger than
-the catalogue), and the sync check between the deployed copies of the core.
+the catalogue), the sync check between the deployed copies of the core, the persisted PCA
+projection, and new-article integration (id assignment, existing vectors left untouched,
+immediate recommendability).
 
 After editing `src/recommender.py`, regenerate the deployed copies:
 
