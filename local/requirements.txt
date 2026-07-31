@@ -1,0 +1,5 @@
+# Solution locale autonome — aucune dépendance cloud.
+# (pas d'azure-functions, pas d'azure-storage-blob, pas de huggingface_hub, pas de requests)
+
+streamlit>=1.30
+numpy>=1.24

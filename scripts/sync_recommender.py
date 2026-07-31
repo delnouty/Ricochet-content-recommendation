@@ -4,6 +4,7 @@ Source unique de vérité : `src/recommender.py`.
 Cibles (copies embarquées, chacune rendant sa solution autonome) :
   - azure_function/shared_code/recommender.py   (solution Azure)
   - spaces/recommender.py                        (solution Hugging Face)
+  - local/recommender.py                         (solution locale, sans cloud)
 
 Chaque copie reçoit un en-tête « généré, ne pas éditer » puis le code identique
 de la source (tout ce qui suit `from __future__ import annotations`).
@@ -26,6 +27,7 @@ MARKER = "from __future__ import annotations"
 TARGETS = {
     ROOT / "azure_function" / "shared_code" / "recommender.py": "solution Azure",
     ROOT / "spaces" / "recommender.py": "solution Hugging Face",
+    ROOT / "local" / "recommender.py": "solution locale",
 }
 
 HEADER = '''"""Cœur de recommandation — COPIE DÉPLOYÉE ({label}).

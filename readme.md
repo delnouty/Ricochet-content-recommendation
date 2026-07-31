@@ -33,14 +33,19 @@ Already-clicked articles are always excluded, and any user without usable histor
 back to the global popularity ranking — the cold-start baseline the target architecture
 builds on.
 
-## Two independent deployments
+## Three independent deployments
 
-One core (`src/recommender.py`), two self-sufficient solutions — neither calls the other:
+One core (`src/recommender.py`), three self-sufficient solutions — none calls another:
 
-| Solution | Serving | Artifacts loaded from |
-|---|---|---|
-| **Azure** — `azure_function/` + `app/` | HTTP Azure Function (serverless, no dedicated API) | Blob Storage container |
-| **Hugging Face** — `spaces/` | Streamlit Space that embeds the recommender and computes locally | HF Hub model repo (`snapshot_download`) |
+| Solution | Serving | Artifacts from | Cloud dependencies |
+|---|---|---|---|
+| **Azure** — `azure_function/` + `app/` | HTTP Azure Function (serverless, no dedicated API) | Blob Storage container | `azure-functions`, `azure-storage-blob` |
+| **Hugging Face** — `spaces/` | Streamlit Space embedding the recommender | HF Hub model repo (`snapshot_download`) | `huggingface_hub` |
+| **Local** — `local/` | Streamlit app computing in-process | folder on disk | **none** |
+
+The `local/` solution is the one to run when you just want the engine working on your
+machine: no account, no network call, no cloud SDK — `streamlit` + `numpy` only. Details:
+[local/README.md](local/README.md).
 
 Architecture rationale and the **target architecture** (onboarding new users and
 articles): [docs/architecture.md](docs/architecture.md).
@@ -59,7 +64,12 @@ articles): [docs/architecture.md](docs/architecture.md).
 ├── app/
 │   └── streamlit_app.py     # demo UI: user_id -> calls the Function -> 5 articles
 ├── spaces/                  # standalone Hugging Face Space (embeds the core)
+├── local/                   # standalone local solution — no cloud at all
+│   ├── app.py               # Streamlit app computing in-process
+│   └── recommender.py       # embedded copy of the core
 ├── scripts/
+│   ├── serve_local.py       # local endpoint, same contract as the Function (no Core Tools)
+│   ├── run_local.ps1        # one-command local stack: endpoint + Streamlit app
 │   └── sync_recommender.py  # regenerates the deployed copies of the core
 ├── tests/                   # unit tests on synthetic artifacts
 ├── docs/                    # architecture, presentation, GxP/CSV pack
@@ -86,22 +96,61 @@ Produces `articles_embeddings_pca.npy`, `user_clicks.pkl`, `popular_articles.npy
 `cf_*` ALS factors. If `implicit` is not installed the collaborative step is skipped with a
 warning instead of failing — `collab`/`hybrid` then degrade gracefully.
 
-### 3. Run the Azure Function locally
+### 3. Run the local solution — no cloud, no HTTP
 
-```bash
-cd azure_function
-cp local.settings.json.example local.settings.json   # then set MODELS_DIR=../models
-func start                                            # requires Azure Functions Core Tools
+```powershell
+pip install -r local/requirements.txt
+streamlit run local/app.py
 ```
 
-Test: `curl "http://localhost:7071/api/recommend?user_id=0&n=5&method=hybrid"`
+That's the whole thing. The app embeds the recommender, reads `models/` from disk and
+computes in-process; there is no service to start and nothing to configure. It shows the
+selected user's reading history alongside the recommendations, and enriches article ids
+with category / length / publication date when `articles_metadata.csv` is available.
+See [local/README.md](local/README.md) for `MODELS_DIR` / `DATA_DIR` overrides and for
+running the folder outside this repo.
 
-### 4. Run the demo app
+### 4. Exercise the HTTP contract locally (optional)
 
-```bash
+Only useful to test the *Azure-shaped* path — the `app/` UI talking to an endpoint over
+HTTP — without installing Azure Functions Core Tools:
+
+```powershell
 pip install -r app/requirements.txt
-FUNCTION_URL=http://localhost:7071/api/recommend streamlit run app/streamlit_app.py
+.\scripts\run_local.ps1
 ```
+
+Starts `scripts/serve_local.py`, waits for the artifacts to load, then opens
+`app/streamlit_app.py` pointed at it; stopping Streamlit stops the server. That script
+serves the **same route, parameters, response shape and error codes** as the Azure
+Function, on stdlib + `numpy` only. It is a development harness, not a deployment
+target: no authentication, no Blob access, single process.
+
+Two terminals instead:
+
+```powershell
+python scripts/serve_local.py                 # terminal 1 — http://127.0.0.1:7071
+$env:FUNCTION_URL = "http://127.0.0.1:7071/api/recommend"
+streamlit run app/streamlit_app.py            # terminal 2
+```
+
+```powershell
+curl "http://127.0.0.1:7071/api/recommend?user_id=0&n=5&method=hybrid"
+```
+
+### 5. Run the real Azure Function locally (optional)
+
+Only needed to validate the Azure runtime itself — bindings, `host.json`, cold start.
+Requires [Azure Functions Core Tools](https://learn.microsoft.com/azure/azure-functions/functions-run-local):
+
+```powershell
+winget install Microsoft.Azure.FunctionsCoreTools
+cd azure_function
+# local.settings.json already sets MODELS_DIR=../models (copy from the .example if absent)
+func start
+```
+
+Same test URL as above — `func start` also listens on port 7071.
 
 ### Or run the Hugging Face solution instead
 
