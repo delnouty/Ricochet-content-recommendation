@@ -186,9 +186,22 @@ def build_collaborative(clicks: pd.DataFrame, out_dir: Path, factors: int) -> No
     ui = coo_matrix((data, (u_idx, i_idx)),
                     shape=(uniq_users.size, uniq_items.size)).tocsr()
 
-    model = AlternatingLeastSquares(factors=factors, regularization=0.05,
-                                    iterations=15, random_state=42)
-    model.fit(ui)
+    # ALS parallélise déjà ses itérations : laisser OpenBLAS ouvrir en plus son
+    # propre pool de threads dégrade fortement les performances (implicit émet un
+    # avertissement explicite à ce sujet). On borne BLAS à 1 thread pendant
+    # l'entraînement — la borne doit englober la **construction** du modèle, car
+    # c'est là qu'implicit contrôle la configuration BLAS.
+    try:
+        from threadpoolctl import threadpool_limits
+        blas_limit = threadpool_limits(1, "blas")
+    except ImportError:  # threadpoolctl absent : on entraîne sans borne
+        from contextlib import nullcontext
+        blas_limit = nullcontext()
+
+    with blas_limit:
+        model = AlternatingLeastSquares(factors=factors, regularization=0.05,
+                                        iterations=15, random_state=42)
+        model.fit(ui)
 
     np.save(out_dir / "cf_user_factors.npy", model.user_factors.astype(np.float32))
     np.save(out_dir / "cf_item_factors.npy", model.item_factors.astype(np.float32))
