@@ -45,6 +45,20 @@ class Recommender:
             with open(region_file, "rb") as f:
                 self.popular_by_region = pickle.load(f)
 
+        # --- SVD Surprise (facteurs pré-entraînés hors-ligne) ---------------
+        # Surprise n'est pas importée ici : on rejoue son calcul de score en numpy
+        # (µ + biais_user + biais_item + pu·qi). Artefacts optionnels.
+        self._has_svd = (self.models_dir / "svd_item_factors.npy").exists()
+        if self._has_svd:
+            self.svd_user_factors = np.load(self.models_dir / "svd_user_factors.npy").astype(np.float32)
+            self.svd_item_factors = np.load(self.models_dir / "svd_item_factors.npy").astype(np.float32)
+            self.svd_user_bias = np.load(self.models_dir / "svd_user_bias.npy").astype(np.float32)
+            self.svd_item_bias = np.load(self.models_dir / "svd_item_bias.npy").astype(np.float32)
+            self.svd_global_mean = float(np.load(self.models_dir / "svd_global_mean.npy")[0])
+            self.svd_item_ids = np.load(self.models_dir / "svd_item_ids.npy")
+            with open(self.models_dir / "svd_user_index.pkl", "rb") as f:
+                self.svd_user_index: dict[int, int] = pickle.load(f)
+
         # --- Collaborative filtering (facteurs ALS pré-entraînés) ------------
         self._has_cf = (self.models_dir / "cf_item_factors.npy").exists()
         if self._has_cf:
@@ -100,6 +114,25 @@ class Recommender:
         order = self._top_n(scores, self._to_cf_cols(seen), n)
         return self.cf_item_ids[order].tolist()
 
+    def _svd(self, user_id: int, n: int) -> list[int] | None:
+        """Score SVD (Surprise) rejoué en numpy : µ + b_u + b_i + pu·qi."""
+        if not self._has_svd or user_id not in self.svd_user_index:
+            return None
+        row = self.svd_user_index[user_id]
+        scores = (self.svd_global_mean
+                  + self.svd_user_bias[row]
+                  + self.svd_item_bias
+                  + self.svd_item_factors @ self.svd_user_factors[row])
+        seen = self._seen(user_id)
+        order = self._top_n(scores, self._to_svd_cols(seen), n)
+        return self.svd_item_ids[order].tolist()
+
+    def _to_svd_cols(self, article_ids: np.ndarray) -> np.ndarray:
+        """article_id -> indices de colonnes SVD (ignore les absents)."""
+        lookup = {int(a): i for i, a in enumerate(self.svd_item_ids)}
+        cols = [lookup[int(a)] for a in article_ids if int(a) in lookup]
+        return np.array(cols, dtype=np.int64)
+
     def _to_cf_cols(self, article_ids: np.ndarray) -> np.ndarray:
         """Convertit des article_id en indices de colonnes CF (ignore les absents)."""
         lookup = {a: i for i, a in enumerate(self.cf_item_ids)}
@@ -146,6 +179,7 @@ class Recommender:
         dispatch = {
             "content": self._content_based,
             "collab": self._collaborative,
+            "svd": self._svd,
             "hybrid": self._hybrid,
         }
         if method not in dispatch:

@@ -40,6 +40,26 @@ def _read_clicks_csv(path: Path) -> pd.DataFrame:
         return pd.read_csv(path, usecols=CLICK_COLUMNS)
 
 
+def _coerce_int64(clicks: pd.DataFrame) -> pd.DataFrame:
+    """Force les colonnes en entiers et écarte les lignes non numériques.
+
+    Nécessaire car un seul fichier horaire **vide** (`clicks_hour_100.csv` dans le
+    jeu Globo) suffit à faire basculer toutes les colonnes en `object` lors de la
+    concaténation : pandas ne peut pas inférer de type sur zéro ligne. Les
+    identifiants deviennent alors des objets Python, et toute indexation numpy
+    échoue en aval.
+    """
+    for column in clicks.columns:
+        if clicks[column].dtype != np.int64:
+            clicks[column] = pd.to_numeric(clicks[column], errors="coerce")
+
+    before = len(clicks)
+    clicks = clicks.dropna()
+    if len(clicks) < before:
+        print(f"[clicks] {before - len(clicks):,} ligne(s) non numérique(s) écartée(s)")
+    return clicks.astype(np.int64)
+
+
 def load_clicks(data_dir: Path) -> pd.DataFrame:
     """Charge tous les clics depuis un dossier `clicks/` ou un CSV échantillon."""
     clicks_dir = data_dir / "clicks"
@@ -48,11 +68,19 @@ def load_clicks(data_dir: Path) -> pd.DataFrame:
         if not files:
             raise FileNotFoundError(f"Aucun fichier clicks_hour_*.csv dans {clicks_dir}")
         frames = [_read_clicks_csv(f) for f in files]
-        return pd.concat(frames, ignore_index=True)
+
+        # Un fichier vide n'apporte aucune ligne mais imposerait `object` au concat.
+        empty = [f.name for f, frame in zip(files, frames) if frame.empty]
+        if empty:
+            print(f"[clicks] {len(empty)} fichier(s) vide(s) ignoré(s) : "
+                  f"{', '.join(empty[:3])}{'…' if len(empty) > 3 else ''}")
+        frames = [frame for frame in frames if not frame.empty]
+
+        return _coerce_int64(pd.concat(frames, ignore_index=True))
 
     sample = data_dir / "clicks_sample.csv"
     if sample.exists():
-        return _read_clicks_csv(sample)
+        return _coerce_int64(_read_clicks_csv(sample))
 
     raise FileNotFoundError(
         f"Ni {clicks_dir} ni {sample} trouvés. Voir data/README.md pour l'arborescence."
@@ -130,6 +158,53 @@ def build_user_artifacts(clicks: pd.DataFrame, out_dir: Path) -> None:
     popular = (clicks["click_article_id"].value_counts().index.to_numpy().astype(np.int64))
     np.save(out_dir / "popular_articles.npy", popular)
     print(f"[popular_articles] {popular.size} articles classés")
+
+
+def build_article_stars(clicks: pd.DataFrame, out_dir: Path,
+                        max_stars: int = 5) -> np.ndarray:
+    """Note en étoiles de chaque article, déduite du nombre de clics reçus.
+
+    Tout l'historique (≈ 3 M de clics) est distillé en **un octet par article** :
+    l'artefact pèse ~0,4 Mo là où les données dont il est issu pèsent des dizaines
+    de Mo. C'est ce qui permet de servir une note sans embarquer l'historique.
+
+    L'échelle est **logarithmique** :
+
+        1★ : 1-9 clics      3★ : 100-999 clics      5★ : 10 000+ clics
+        2★ : 10-99 clics    4★ : 1 000-9 999 clics
+
+    Pourquoi pas des quantiles : la distribution suit une loi de puissance (de 1 à
+    37 213 clics) et sa médiane vaut 1. Les bornes de quintiles tombent sur
+    [1, 1, 1, 2, 11] — quatre bornes sur cinq sur la même valeur, donc des classes
+    indiscernables. Le logarithme, lui, répartit les articles de façon lisible.
+
+    0 étoile signifie « jamais cliqué » (318 k articles du catalogue).
+    """
+    counts = clicks["click_article_id"].value_counts()
+
+    catalogue = out_dir / "articles_embeddings_pca.npy"
+    if catalogue.exists():
+        n_articles = int(np.load(catalogue, mmap_mode="r").shape[0])
+    else:
+        n_articles = int(counts.index.max()) + 1
+
+    article_clicks = np.zeros(n_articles, dtype=np.int32)
+    ids = counts.index.to_numpy().astype(np.int64)
+    inside = ids < n_articles
+    article_clicks[ids[inside]] = counts.to_numpy()[inside]
+
+    stars = np.zeros(n_articles, dtype=np.int8)
+    clicked = article_clicks > 0
+    stars[clicked] = np.clip(1 + np.floor(np.log10(article_clicks[clicked])),
+                             1, max_stars).astype(np.int8)
+
+    np.save(out_dir / "article_clicks.npy", article_clicks)
+    np.save(out_dir / "article_stars.npy", stars)
+
+    spread = " · ".join(f"{s}★:{int((stars == s).sum()):,}" for s in range(1, max_stars + 1))
+    print(f"[article_stars] {int(clicked.sum()):,} articles notés — {spread}")
+    print(f"[article_stars] artefacts ~{(stars.nbytes + article_clicks.nbytes) / 1e6:.1f} Mo")
+    return stars
 
 
 def build_segment_popularity(clicks: pd.DataFrame, out_dir: Path,
@@ -229,6 +304,7 @@ def main() -> None:
     clicks = load_clicks(args.data_dir)
     print(f"[clicks] {len(clicks):,} interactions chargées")
     build_user_artifacts(clicks, args.out_dir)
+    build_article_stars(clicks, args.out_dir)
     build_segment_popularity(clicks, args.out_dir, args.min_region_clicks)
     build_collaborative(clicks, args.out_dir, args.factors)
     print("\nArtefacts prêts dans", args.out_dir.resolve())

@@ -237,6 +237,16 @@ def view_recommendations(reco: Recommender, store: UserStore, meta: dict) -> Non
         st.caption("Client inscrit localement : absent des facteurs ALS, le "
                    "collaboratif retombe sur le contenu jusqu'au prochain ré-entraînement.")
 
+    # Action explicite : rien n'est calculé avant le clic. Le choix du client reste
+    # mémorisé ensuite, pour que les recommandations se rafraîchissent d'elles-mêmes
+    # quand on marque un article comme lu ou qu'on change de stratégie.
+    if st.button("Recommander", type="primary"):
+        st.session_state["recs_for"] = int(user_id)
+
+    if st.session_state.get("recs_for") != int(user_id):
+        st.caption("Cliquez sur « Recommander » pour obtenir les suggestions.")
+        return
+
     try:
         recs = reco.recommend(int(user_id), n=n, method=method, region=region)
     except ValueError as exc:
