@@ -17,11 +17,25 @@ reçoivent donc les identifiants suivants, à la queue de la matrice.
 Ce que le script ne fait **pas**, volontairement :
   - il ne touche pas `popular_articles.npy` : un article sans clic n'a aucune
     popularité, il sera recommandé par similarité de contenu et par là seulement ;
+  - il ne touche pas `article_stars.npy` / `article_clicks.npy` : la note en étoiles
+    se déduit du nombre de clics reçus, un article qui vient d'être publié n'en a
+    aucun. Ces tableaux restent donc plus courts que le catalogue, et les
+    applications l'assument (`describe()` vérifie `article_id < stars.size`) : le
+    nouvel article s'affiche sans étoile jusqu'au prochain calcul des notes ;
+  - il ne touche pas les facteurs collaboratifs (`cf_*` de l'ALS, `svd_*` de
+    Surprise) : ces modèles ignoreront l'article jusqu'à leur ré-entraînement, et
+    retomberont proprement sur le contenu ;
   - il ne touche pas `articles_metadata.csv` (donnée source, pas artefact) : les
     applications afficheront « Article #<id> » sans catégorie ni date ;
   - il ne recharge pas les services : les artefacts sont lus au démarrage, il faut
     redémarrer l'application (et republier vers Blob / HF Hub pour les solutions
     Azure et Hugging Face).
+
+Pour qu'un article ajouté obtienne étoiles, popularité et facteurs, il faut
+relancer le calcul hors-ligne une fois qu'il a réellement été lu :
+
+    python -m src.prepare_model --data-dir <data> --out-dir models
+    python -m src.collaborative_surprise --data-dir <data> --out-dir models
 
 Usage :
     python scripts/add_articles.py --embeddings nouveaux.npy
