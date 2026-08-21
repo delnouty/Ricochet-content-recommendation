@@ -33,7 +33,14 @@ from recommender import Recommender  # copie embarquée (scripts/sync_recommende
 from user_store import UserStore
 
 HERE = Path(__file__).resolve().parent
-STRATEGIES = ["hybrid", "content", "collab"]
+# Libellés explicites : « collab » et « svd » sont deux modèles collaboratifs
+# différents, entraînés par deux bibliothèques différentes.
+STRATEGIES = {
+    "hybrid": "Hybride — contenu + ALS (défaut)",
+    "content": "Contenu — similarité des embeddings",
+    "collab": "Collaboratif ALS — bibliothèque implicit",
+    "svd": "Collaboratif SVD — bibliothèque Surprise",
+}
 
 
 # --------------------------------------------------------------------- chargement
@@ -90,14 +97,46 @@ def get_metadata(path_str: str | None) -> dict[int, tuple[int, int, int]]:
     return out
 
 
+@st.cache_resource(show_spinner="Chargement des notes…")
+def get_ratings() -> tuple[np.ndarray | None, np.ndarray | None]:
+    """Étoiles et nombre de clics par article (artefacts optionnels).
+
+    Produits par `prepare_model.build_article_stars` : tout l'historique de clics
+    distillé en un octet par article. On peut donc afficher une note sans embarquer
+    les données utilisateur.
+    """
+    models_dir = resolve_models_dir()
+    stars_file = models_dir / "article_stars.npy"
+    clicks_file = models_dir / "article_clicks.npy"
+    if not stars_file.exists():
+        return None, None
+    stars = np.load(stars_file)
+    clicks = np.load(clicks_file) if clicks_file.exists() else None
+    return stars, clicks
+
+
 # ---------------------------------------------------------------------- affichage
 def describe(article_id: int, meta: dict) -> str:
+    stars, clicks = get_ratings()
+
+    # Note : ★ par facteur 10 de clics (voir build_article_stars). 0 = jamais lu.
+    note = ""
+    if stars is not None and int(article_id) < stars.size:
+        n_stars = int(stars[int(article_id)])
+        if n_stars > 0:
+            note = " " + "★" * n_stars
+            if clicks is not None:
+                note += f" ({int(clicks[int(article_id)]):,} lecteurs)".replace(",", " ")
+        else:
+            note = " ☆ (jamais lu)"
+
     entry = meta.get(int(article_id))
     if not entry:
-        return f"Article #{article_id}"
+        return f"Article #{article_id}{note}"
     category, words, created_ts = entry
     published = datetime.fromtimestamp(created_ts / 1000, tz=timezone.utc).strftime("%d/%m/%Y")
-    return f"Article #{article_id} — catégorie {category} · {words} mots · publié le {published}"
+    return (f"Article #{article_id}{note} — catégorie {category} · {words} mots "
+            f"· publié le {published}")
 
 
 @st.cache_resource(show_spinner="Tri du catalogue…")
@@ -216,7 +255,8 @@ def view_recommendations(reco: Recommender, store: UserStore, meta: dict) -> Non
     user_id = dict(choices)[label]
 
     col1, col2 = st.columns(2)
-    method = col1.selectbox("Stratégie", STRATEGIES, index=0)
+    method = col1.selectbox("Stratégie", list(STRATEGIES), index=0,
+                            format_func=lambda m: STRATEGIES[m])
     n = col2.slider("Nombre d'articles", 1, 10, 5)
 
     history = list(reco.user_clicks.get(int(user_id), []))
@@ -290,9 +330,13 @@ def view_browse(reco: Recommender, store: UserStore, meta: dict) -> None:
 
     ORDERS = {"Les plus lus": "popular", "Les plus récents": "recent",
               "Les plus courts": "short", "Les plus longs": "long"}
-    col1, col2 = st.columns([2, 1])
+    col1, col2, col3 = st.columns([2, 1, 1])
     order_label = col1.selectbox("Trier par", list(ORDERS), key="browse_order")
-    hide_read = col2.checkbox("Masquer les articles lus", value=True, key="browse_hide")
+    # Trier « par étoiles » reviendrait exactement au tri « Les plus lus » : les
+    # étoiles sont le nombre de clics ramené à cinq classes. On offre donc un
+    # filtre, qui se combine avec n'importe quel tri (ex. récents ET bien notés).
+    min_stars = col2.slider("Note minimale (★)", 0, 5, 0, key="browse_min_stars")
+    hide_read = col3.checkbox("Masquer les articles lus", value=True, key="browse_hide")
 
     if not meta and ORDERS[order_label] != "popular":
         st.warning("`articles_metadata.csv` absent : seul le tri par popularité "
@@ -300,6 +344,14 @@ def view_browse(reco: Recommender, store: UserStore, meta: dict) -> None:
 
     articles = get_sorted_articles(meta, ORDERS[order_label],
                                    tuple(int(a) for a in reco.popular_articles))
+
+    stars, _ = get_ratings()
+    if min_stars > 0:
+        if stars is None:
+            st.warning("`article_stars.npy` absent : filtre par note indisponible.")
+        else:
+            articles = [a for a in articles
+                        if a < stars.size and stars[a] >= min_stars]
 
     already_read = set(int(a) for a in reco.user_clicks.get(int(user_id), []))
     if hide_read:
@@ -353,8 +405,13 @@ def main() -> None:
         st.caption(f"Clients inscrits : {len(store.list_clients())}")
         st.caption(f"Utilisateurs du jeu de données : "
                    f"{len(reco.user_clicks) - len(store.list_clients()):,}")
-        st.caption(f"Filtrage collaboratif : {'disponible' if reco._has_cf else 'absent'}")
+        st.caption(f"ALS (implicit) : {'disponible' if reco._has_cf else 'absent'}")
+        st.caption(f"SVD (Surprise) : {'disponible' if reco._has_svd else 'absent'}")
         st.caption(f"Métadonnées : {'chargées' if meta else 'non trouvées'}")
+        _stars, _ = get_ratings()
+        st.caption("Notes ★ : "
+                   + (f"{int((_stars > 0).sum()):,} articles notés".replace(",", " ")
+                      if _stars is not None else "artefact absent"))
         st.caption(f"Base clients : `{store.db_path}`")
 
     tab_reco, tab_browse, tab_new = st.tabs(
