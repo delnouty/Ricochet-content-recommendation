@@ -34,6 +34,8 @@ def ensure_models() -> Path:
         repo_id=repo_id,
         repo_type="model",
         token=os.environ.get("HF_TOKEN"),
-        allow_patterns=["*.npy", "*.pkl"],
+        # `recent_window.json` fait partie des artefacts : sans lui, l'interface
+        # ne sait pas de quand date le vivier de fraîcheur.
+        allow_patterns=["*.npy", "*.pkl", "recent_window.json"],
     )
     return Path(path)

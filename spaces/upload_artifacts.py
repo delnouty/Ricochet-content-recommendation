@@ -30,7 +30,9 @@ def main() -> None:
         folder_path=str(args.models_dir),
         repo_id=args.repo,
         repo_type="model",
-        allow_patterns=["*.npy", "*.pkl"],
+        # `recent_window.json` fait partie des artefacts : sans lui, l'interface
+        # ne sait pas de quand date le vivier de fraîcheur.
+        allow_patterns=["*.npy", "*.pkl", "recent_window.json"],
     )
     print(f"Artefacts publiés dans https://huggingface.co/{args.repo}")
 

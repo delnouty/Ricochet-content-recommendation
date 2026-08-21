@@ -1,11 +1,16 @@
-"""COPIE DÉPLOYÉE (solution locale) — générée depuis src/user_store.py.
+"""Enregistrement des clients et de leurs lectures (SQLite, bibliothèque standard).
 
-⚠️  NE PAS ÉDITER ICI : toute modification serait écrasée.
-    Source unique de vérité : src/user_store.py
-    Régénérer : python scripts/sync_recommender.py
-    Vérifier  : python scripts/sync_recommender.py --check   (utilisé en CI)
+Les artefacts (`user_clicks.pkl`) sont en lecture seule : ils figent un lot. Pour
+inscrire un nouveau client et faire évoluer son profil au fil de ses lectures, il
+faut un stockage inscriptible — c'est ce module.
+
+Choix : SQLite (`sqlite3`, stdlib) — aucune dépendance ajoutée, écriture atomique,
+fichier unique. Une connexion par opération, car Streamlit ré-exécute le script
+dans des threads différents.
+
+Les nouveaux clients reçoivent des `user_id` à partir de 1 000 000, très au-delà
+des identifiants du jeu de données : aucune collision possible.
 """
-
 
 from __future__ import annotations
 

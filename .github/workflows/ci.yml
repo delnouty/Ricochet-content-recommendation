@@ -1,0 +1,68 @@
+# Intégration continue — vérifications rapides, sans données.
+#
+# Ce workflow ne peut pas entraîner de modèle : le jeu de données Globo n'est pas
+# versionné (221 Mo). Il vérifie donc ce qui est vérifiable sans lui — et c'est
+# volontairement la moitié du travail MLOps : garantir que le code servi est sain
+# et que les artefacts déployés sont cohérents entre eux.
+#
+# L'entraînement et l'évaluation vivent dans `train.yml`, déclenché manuellement.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Installer les dépendances de développement
+        run: pip install -r requirements-dev.txt
+
+      - name: Tests unitaires
+        # Les tests tournent sur des artefacts synthétiques : aucune donnée requise.
+        run: python -m pytest tests/ -q
+
+      - name: Cohérence des copies du cœur de reco
+        # Les trois solutions embarquent une copie de src/recommender.py. Une copie
+        # périmée signifierait qu'une correction n'est pas déployée.
+        run: python scripts/sync_recommender.py --check
+
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Aucun fichier volumineux versionné
+        # Données et artefacts doivent rester hors du dépôt (Blob / HF Hub).
+        run: |
+          gros=$(find . -path ./.git -prune -o -type f -size +5M -print)
+          if [ -n "$gros" ]; then
+            echo "Fichiers de plus de 5 Mo versionnés :"; echo "$gros"; exit 1
+          fi
+          echo "aucun fichier volumineux"
+
+      - name: Aucun artefact de modèle versionné
+        run: |
+          trouves=$(git ls-files 'models/*.npy' 'models/*.pkl' '*.db' | grep -v baseline || true)
+          if [ -n "$trouves" ]; then
+            echo "Artefacts versionnés par erreur :"; echo "$trouves"; exit 1
+          fi
+          echo "models/ propre"
+
+      - name: Les notebooks ne contiennent pas de secret
+        run: |
+          if git grep -nEi '(AZURE_STORAGE_CONNECTION_STRING|HF_TOKEN)\s*=\s*["'"'"'][^"'"'"']+' -- '*.ipynb' '*.py'; then
+            echo "Secret potentiellement en clair"; exit 1
+          fi
+          echo "aucun secret en clair"

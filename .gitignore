@@ -8,7 +8,9 @@ data/*.zip
 dta/news-portal-user
 
 # Artefacts de modèle générés (peuvent être régénérés / poussés vers Blob)
-models/
+# `models/*` et non `models/` : à l'intérieur d'un dossier ignoré, les exceptions
+# ci-dessous seraient sans effet.
+models/*
 !models/.gitkeep
 
 # Python
@@ -45,3 +47,14 @@ data/news-portal-user/
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# Traçabilité MLflow (local, régénérable)
+mlflow.db
+mlruns/
+models_split/
+models_split_svd*/
+metrics.json
+
+# Exception : la référence de métriques est le contrat de la porte de qualité,
+# elle DOIT être versionnée (sinon la CI n'a rien à comparer).
+!models/baseline_metrics.json

@@ -78,52 +78,59 @@ def build_artifacts(clicks_train: pd.DataFrame, source_models: Path, out_dir: Pa
         save_artifacts(algo, trainset, out_dir)
 
 
-def evaluate(models_dir: Path, clicks_eval: pd.DataFrame, n: int = 5,
-             max_users: int = 2000) -> pd.DataFrame:
-    """Mesure chaque stratégie sur une période **postérieure** à l'entraînement.
+def evaluate(models_dir: Path, clicks_history: pd.DataFrame, clicks_eval: pd.DataFrame,
+             n: int = 5, max_users: int = 2000, pop_hours: float = 1,
+             content_hours: float = 6, als_hours: float = 24,
+             als_factors: int = 16) -> pd.DataFrame:
+    """Mesure chaque stratégie sur une période **postérieure** à l'historique fourni.
 
-    Vérité terrain : les articles réellement cliqués pendant la période d'évaluation
-    par un lecteur déjà connu de la période d'entraînement.
+    Deux règles de protocole, établies par les notebooks 03 à 07 :
+
+    1. **Le vivier de candidats est recalculé à partir de `clicks_history`**, c'est-à-
+       dire tout ce qui précède la période évaluée. Un vivier gelé à la fin de
+       l'entraînement est périmé et donne 0,0000 pour toutes les méthodes — mesuré.
+    2. **Chaque méthode reçoit sa meilleure configuration** (fenêtres et facteurs
+       réglés sur la validation). Comparer une méthode réglée à des méthodes par
+       défaut fausse la conclusion.
+
+    Les valeurs par défaut sont les optima mesurés : popularité sur 1 h, contenu sur
+    un vivier de 6 h, ALS entraîné sur 24 h avec 16 facteurs.
     """
+    from src import experiments as xp
     from src.recommender import Recommender
 
     reco = Recommender(models_dir)
 
-    cible = (clicks_eval.groupby("user_id")["click_article_id"]
-             .apply(lambda s: {int(a) for a in s}))
-    connus = [u for u in cible.index if int(u) in reco.user_clicks][:max_users]
-    print(f"[eval] {len(connus):,} lecteurs évalués "
-          f"(connus à l'entraînement et actifs ensuite)")
+    # Les profils doivent inclure tout l'historique disponible, pas seulement la
+    # période d'entraînement des artefacts.
+    for user_id, articles in clicks_history.groupby("user_id")["click_article_id"]:
+        nouveaux = articles.to_numpy(dtype=np.int64)
+        ancien = reco.user_clicks.get(int(user_id))
+        reco.user_clicks[int(user_id)] = (nouveaux if ancien is None
+                                         else np.unique(np.concatenate([ancien, nouveaux])))
+
+    pool_pop = xp.recent_pool(clicks_history, pop_hours)
+    pool = xp.recent_pool(clicks_history, content_hours)
+    print(f"[eval] vivier popularité {pool_pop.size:,} articles ({pop_hours} h) | "
+          f"vivier contenu {pool.size:,} articles ({content_hours} h)")
+
+    users, cible = xp.eval_users(reco, clicks_eval, max_users=max_users)
+    print(f"[eval] {len(users):,} lecteurs évalués (connus et actifs ensuite)")
+
+    popularite = xp.make_popularity(pool_pop)
+    contenu = xp.make_content(reco, pool, last_k=None)
+    als = xp.train_als_window(clicks_history, als_hours, factors=als_factors)(pool)
 
     strategies = {
-        "hybrid": lambda u, k: reco.recommend(u, n=k, method="hybrid"),
-        "content": lambda u, k: reco.recommend(u, n=k, method="content"),
-        "collab (ALS)": lambda u, k: reco.recommend(u, n=k, method="collab"),
-        "svd (Surprise)": lambda u, k: reco.recommend(u, n=k, method="svd"),
-        "popularité": lambda u, k: reco._popularity_fallback(u, k),
+        f"popularité {pop_hours} h": popularite,
+        f"contenu (vivier {content_hours} h)": contenu,
+        f"ALS ({als_hours} h, {als_factors} facteurs)": als,
+        "mixte 4 popularité + 1 contenu": xp.make_mix(popularite, contenu, 1),
     }
+    if reco._has_svd:
+        strategies["SVD (Surprise)"] = xp.make_svd(reco, pool)
 
-    lignes = []
-    for nom, fonction in strategies.items():
-        succes = rappel = 0.0
-        listes = []
-        for u in connus:
-            attendu = cible[u]
-            recs = fonction(int(u), n)
-            trouves = len(attendu & set(recs))
-            succes += trouves > 0
-            rappel += trouves / len(attendu)
-            listes.append(set(recs))
-
-        couverture = len({a for liste in listes for a in liste}) / reco.n_articles
-        paires = list(itertools.islice(itertools.combinations(range(len(listes)), 2), 3000))
-        recouvrement = float(np.mean([len(listes[i] & listes[j]) / n for i, j in paires]))
-        lignes.append({"stratégie": nom,
-                       f"HitRate@{n}": round(succes / len(connus), 4),
-                       f"Recall@{n}": round(rappel / len(connus), 4),
-                       "couverture %": round(couverture * 100, 3),
-                       "personnalisation %": round((1 - recouvrement) * 100, 1)})
-    return pd.DataFrame(lignes).set_index("stratégie")
+    return xp.compare(strategies, users, cible, n=n, n_articles=reco.n_articles)
 
 
 def main() -> int:
@@ -141,6 +148,15 @@ def main() -> int:
     parser.add_argument("--skip-build", action="store_true",
                         help="réutiliser les artefacts déjà construits")
     parser.add_argument("--no-svd", action="store_true")
+    parser.add_argument("--json", type=Path,
+                        help="écrire les métriques dans ce fichier (porte de qualité CI)")
+    parser.add_argument("--track", action="store_true",
+                        help="enregistrer les résultats dans MLflow")
+    parser.add_argument("--experiment", default="ricochet-evaluation",
+                        help="nom de l'expérience MLflow")
+    parser.add_argument("--register", metavar="NOM",
+                        help="versionner les artefacts dans le registre MLflow "
+                             "sous ce nom (ex. ricochet-artefacts)")
     args = parser.parse_args()
 
     from src.prepare_model import load_clicks
@@ -153,11 +169,63 @@ def main() -> int:
         build_artifacts(train, args.source_models, args.out_dir,
                         factors=args.factors, with_svd=not args.no_svd)
 
-    evaluation = val if args.split == "val" else test
-    print(f"\n=== évaluation sur la période « {args.split} » ===")
-    resultats = evaluate(args.out_dir, evaluation, n=args.n, max_users=args.max_users)
+    # Historique disponible au moment de l'évaluation : tout ce qui la précède.
+    # Pour le test, la validation est déjà du passé — l'utiliser n'est pas une fuite,
+    # c'est ce que fait un service en production au moment de répondre.
+    if args.split == "val":
+        evaluation, historique = val, train
+    else:
+        evaluation, historique = test, pd.concat([train, val], ignore_index=True)
+
+    print(f"\n=== évaluation sur la période « {args.split} » "
+          f"({len(historique):,} clics d'historique) ===")
+    resultats = evaluate(args.out_dir, historique, evaluation, n=args.n,
+                         max_users=args.max_users)
     print()
     print(resultats.to_string())
+
+    contexte = {"split": args.split, "n": args.n, "factors": args.factors,
+                "clics_entrainement": len(train), "clics_evaluation": len(evaluation),
+                "lecteurs_max": args.max_users}
+
+    if args.track:
+        from src import tracking
+        runs = tracking.log_comparison(args.experiment, resultats,
+                                       params_communs=contexte,
+                                       tags={"split": args.split})
+        if runs:
+            print(f"\n[mlflow] {len(runs)} essai(s) enregistré(s) dans "
+                  f"l'expérience « {args.experiment} »")
+
+    if args.register:
+        from src import tracking
+        colonne_hr = f"HitRate@{args.n}"
+        meilleure_ligne = resultats.loc[resultats[colonne_hr].idxmax()]
+        tracking.register_artifacts(
+            args.register, args.out_dir,
+            metrics={k: float(v) for k, v in meilleure_ligne.items()},
+            params={**contexte, "strategie": str(resultats[colonne_hr].idxmax())},
+            tags={"split": args.split})
+
+    if args.json:
+        import json as _json
+
+        # La porte de qualité surveille la **meilleure** stratégie du tableau : c'est
+        # celle qui serait déployée. Suivre une moyenne masquerait une régression sur
+        # la seule configuration qui compte.
+        colonne = f"HitRate@{args.n}"
+        meilleure = resultats[colonne].idxmax()
+        charge = {"run_name": f"{args.split}-{meilleure}",
+                  "strategie": meilleure,
+                  "params": contexte,
+                  "metrics": {k: float(v) for k, v in resultats.loc[meilleure].items()},
+                  "toutes_strategies": {str(i): {k: float(v) for k, v in ligne.items()}
+                                        for i, ligne in resultats.iterrows()}}
+        args.json.parent.mkdir(parents=True, exist_ok=True)
+        args.json.write_text(_json.dumps(charge, indent=2, ensure_ascii=False),
+                             encoding="utf-8")
+        print(f"[json] métriques écrites dans {args.json} "
+              f"(stratégie retenue : {meilleure})")
     return 0
 
 

@@ -1,0 +1,50 @@
+{
+  "run_name": "test-popularité 1 h",
+  "strategie": "popularité 1 h",
+  "params": {
+    "split": "test",
+    "n": 5,
+    "factors": 50,
+    "clics_entrainement": 1792908,
+    "clics_evaluation": 597637,
+    "lecteurs_max": 2000
+  },
+  "metrics": {
+    "HitRate@5": 0.2525,
+    "Recall@5": 0.0554,
+    "couverture %": 0.001,
+    "personnalisation %": 0.0
+  },
+  "toutes_strategies": {
+    "popularité 1 h": {
+      "HitRate@5": 0.2525,
+      "Recall@5": 0.0554,
+      "couverture %": 0.001,
+      "personnalisation %": 0.0
+    },
+    "contenu (vivier 6 h)": {
+      "HitRate@5": 0.02,
+      "Recall@5": 0.0034,
+      "couverture %": 0.267,
+      "personnalisation %": 96.2
+    },
+    "ALS (24 h, 16 facteurs)": {
+      "HitRate@5": 0.025,
+      "Recall@5": 0.0036,
+      "couverture %": 0.012,
+      "personnalisation %": 94.2
+    },
+    "mixte 4 popularité + 1 contenu": {
+      "HitRate@5": 0.2515,
+      "Recall@5": 0.054,
+      "couverture %": 0.117,
+      "personnalisation %": 19.9
+    },
+    "SVD (Surprise)": {
+      "HitRate@5": 0.0,
+      "Recall@5": 0.0,
+      "couverture %": 0.001,
+      "personnalisation %": 0.0
+    }
+  }
+}

@@ -1,3 +1,4 @@
 # Dépendances de développement / tests
 -r requirements.txt
 pytest>=7.4
+mlflow>=2.9              # traçabilité des expériences (hors-ligne uniquement)

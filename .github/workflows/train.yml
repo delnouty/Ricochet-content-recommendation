@@ -1,0 +1,101 @@
+# Pipeline d'entraînement et de publication — le volet MLOps.
+#
+# Enchaînement : données -> artefacts -> évaluation -> **porte de qualité** ->
+# publication. La porte est l'élément décisif : sans elle, un ré-entraînement
+# dégradé partirait en production sans que personne ne le sache.
+#
+#   1. reconstruire les artefacts sur la période d'entraînement
+#   2. évaluer sur la période de test, tracer dans MLflow
+#   3. comparer aux métriques de référence versionnées (scripts/check_metrics.py)
+#   4. publier vers Blob / HF Hub uniquement si la porte passe
+#
+# Pourquoi `workflow_dispatch` et non un cron : les données (221 Mo) ne sont pas
+# dans le dépôt. Ce workflow suppose un runner ayant accès au jeu de données, soit
+# auto-hébergé, soit récupérant les données depuis un stockage (étape à compléter
+# selon l'hébergement retenu — voir docs/architecture.md §4.f).
+
+name: Entraînement et publication
+
+on:
+  workflow_dispatch:
+    inputs:
+      tolerance:
+        description: "Baisse relative de HitRate@5 acceptée (0.10 = 10 %)"
+        default: "0.10"
+      promote:
+        description: "Mettre à jour la référence après succès (oui / non)"
+        default: "non"
+  # Décommenter une fois les données accessibles au runner :
+  # schedule:
+  #   - cron: "0 3 * * *"      # ré-entraînement quotidien, comme prévu en §4.f
+
+jobs:
+  entrainer-et-valider:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Installer les dépendances
+        run: pip install -r requirements-dev.txt
+
+      - name: Récupérer le jeu de données
+        # À COMPLÉTER selon l'hébergement : azcopy depuis Blob, huggingface-cli
+        # download, ou montage sur runner auto-hébergé. Le pipeline échoue
+        # volontairement ici plutôt que d'entraîner sur des données absentes.
+        run: |
+          if [ ! -d data/news-portal-user/clicks ]; then
+            echo "Données absentes : étape de récupération à implémenter." >&2
+            exit 1
+          fi
+
+      - name: Construire les artefacts (période d'entraînement uniquement)
+        run: |
+          python -m src.prepare_model --data-dir data/news-portal-user --out-dir models
+          python -m src.evaluate --data-dir data/news-portal-user --out-dir models_split \
+            --split test --track --json metrics.json
+
+      - name: Porte de qualité — refuser une régression
+        run: |
+          python scripts/check_metrics.py \
+            --candidate metrics.json \
+            --baseline models/baseline_metrics.json \
+            --tolerance "${{ inputs.tolerance }}"
+
+      - name: Conserver les métriques et le suivi MLflow
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: metriques-et-suivi
+          path: |
+            metrics.json
+            mlflow.db
+            mlruns/
+
+      - name: Publier les artefacts (uniquement si la porte est passée)
+        # Les deux solutions de déploiement lisent les artefacts depuis un stockage
+        # distant : la publication est donc la véritable mise en production.
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
+        run: |
+          if [ -n "$HF_TOKEN" ]; then
+            python spaces/upload_artifacts.py --repo "${{ vars.HF_MODEL_REPO }}" --models-dir models
+          else
+            echo "HF_TOKEN absent : publication ignorée."
+          fi
+
+      - name: Promouvoir la référence (acte délibéré)
+        if: ${{ inputs.promote == 'oui' }}
+        run: |
+          python scripts/check_metrics.py --candidate metrics.json \
+            --baseline models/baseline_metrics.json --promote
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add models/baseline_metrics.json
+          git commit -m "Référence de métriques mise à jour (run ${{ github.run_id }})"
+          git push

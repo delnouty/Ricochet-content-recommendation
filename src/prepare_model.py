@@ -8,7 +8,11 @@ légers, chargés ensuite par `Recommender` (et par l'Azure Function) :
   - pca_mean.npy / pca_components.npy : la projection ACP elle-même, nécessaire
     pour intégrer un **nouvel article** sans réajuster l'ACP (project_embeddings) ;
   - user_clicks.pkl             : dict user_id -> np.ndarray des article_id lus ;
-  - popular_articles.npy        : article_id triés par popularité (cold start) ;
+  - popular_articles.npy        : article_id triés par popularité (tout l'historique) ;
+  - popular_recent.npy          : popularité sur **fenêtre glissante** + vivier
+    d'articles frais — le levier le plus fort du projet (facteur 250 sur la
+    précision, voir build_recent_popularity) ;
+  - recent_window.json          : bornes de la fenêtre, pour dater le classement ;
   - popular_by_region.pkl       : popularité **par région**, pour un cold start
     contextuel (un nouveau lecteur reçoit ce qui marche dans sa région) ;
   - cf_*.npy / cf_*.pkl         : facteurs ALS du filtrage collaboratif.
@@ -160,6 +164,75 @@ def build_user_artifacts(clicks: pd.DataFrame, out_dir: Path) -> None:
     print(f"[popular_articles] {popular.size} articles classés")
 
 
+def build_recent_popularity(clicks: pd.DataFrame, out_dir: Path,
+                            window_hours: float = 6,
+                            min_articles: int = 200) -> np.ndarray:
+    """Popularité sur une **fenêtre glissante**, et vivier d'articles frais.
+
+    C'est le levier le plus fort du projet, mesuré sur découpage temporel :
+
+        popularité sur tout l'historique  ->  HitRate@5 = 0,0010
+        popularité sur la dernière heure  ->  HitRate@5 = 0,2525
+
+    Un facteur 250 sans changer d'algorithme. La raison : 48 % des articles lus
+    pendant la période évaluée n'existaient pas encore pendant l'entraînement. Un
+    classement sur tout l'historique noie les nouveautés ; une fenêtre courte les
+    capte.
+
+    Produit deux artefacts :
+      - `popular_recent.npy`  : article_id de la fenêtre, du plus lu au moins lu.
+        Sert à la fois de repli cold start et de **vivier de candidats** pour les
+        autres stratégies ;
+      - `recent_window.json`  : bornes et taille de la fenêtre, pour savoir de quand
+        date le classement servi.
+
+    ⚠️ Un artefact de fraîcheur périme. Servi deux jours plus tard, il redescend à
+    0,0000 — mesuré. En production, la fenêtre se recalcule à intervalle régulier
+    (§4.f de docs/architecture.md).
+    """
+    import json
+
+    horodatages = clicks["click_timestamp"]
+
+    # L'ancre n'est **pas** le dernier clic : le jeu Globo contient des horodatages
+    # aberrants — 99,9 % des clics s'arrêtent 665 h avant le dernier, et il ne reste
+    # que 76 clics dans les 480 dernières heures. Ancrer sur le maximum donnerait une
+    # fenêtre vide. On prend donc un quantile élevé comme « instant présent ».
+    ancre = int(horodatages.quantile(0.999))
+    aberrants = int((horodatages > ancre).sum())
+
+    # Élargissement automatique : une fenêtre trop étroite ne peut pas remplir un
+    # top-n, et un classement de trois articles n'est pas un classement.
+    heures = float(window_hours)
+    while True:
+        fenetre = clicks[(horodatages >= ancre - heures * 3600 * 1000)
+                         & (horodatages <= ancre)]
+        ordre = (fenetre["click_article_id"].value_counts().index
+                 .to_numpy().astype(np.int64))
+        if ordre.size >= min_articles or heures >= 24 * 30:
+            break
+        heures *= 2
+
+    np.save(out_dir / "popular_recent.npy", ordre)
+
+    meta = {"window_hours_demandee": window_hours,
+            "window_hours_effective": heures,
+            "ancre_ms": ancre, "debut_ms": int(ancre - heures * 3600 * 1000),
+            "clics_fenetre": int(len(fenetre)),
+            "articles_fenetre": int(ordre.size),
+            "clics_aberrants_ecartes": aberrants}
+    (out_dir / "recent_window.json").write_text(
+        json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    print(f"[popular_recent] fenêtre {heures:g} h "
+          f"{'(élargie depuis ' + format(window_hours, 'g') + ' h)' if heures != window_hours else ''}"
+          f" : {ordre.size:,} articles, {len(fenetre):,} clics")
+    if aberrants:
+        print(f"[popular_recent] {aberrants} clic(s) au-delà de l'ancre écarté(s) "
+              "(horodatages aberrants)")
+    return ordre
+
+
 def build_article_stars(clicks: pd.DataFrame, out_dir: Path,
                         max_stars: int = 5) -> np.ndarray:
     """Note en étoiles de chaque article, déduite du nombre de clics reçus.
@@ -294,6 +367,9 @@ def main() -> None:
     parser.add_argument("--out-dir", default="models", type=Path)
     parser.add_argument("--pca", default=50, type=int, help="dimensions après ACP")
     parser.add_argument("--factors", default=50, type=int, help="facteurs latents ALS")
+    parser.add_argument("--window-hours", default=6, type=float,
+                        help="fenêtre de fraîcheur en heures (popularité récente et "
+                             "vivier de candidats) ; 1 à 6 selon le trafic")
     parser.add_argument("--min-region-clicks", default=30, type=int,
                         help="clics minimum pour retenir une région (cold start contextuel)")
     args = parser.parse_args()
@@ -304,6 +380,7 @@ def main() -> None:
     clicks = load_clicks(args.data_dir)
     print(f"[clicks] {len(clicks):,} interactions chargées")
     build_user_artifacts(clicks, args.out_dir)
+    build_recent_popularity(clicks, args.out_dir, args.window_hours)
     build_article_stars(clicks, args.out_dir)
     build_segment_popularity(clicks, args.out_dir, args.min_region_clicks)
     build_collaborative(clicks, args.out_dir, args.factors)

@@ -1,4 +1,4 @@
-"""COPIE DÉPLOYÉE (solution locale) — générée depuis src/user_store.py.
+"""COPIE DÉPLOYÉE (solution Hugging Face) — générée depuis src/user_store.py.
 
 ⚠️  NE PAS ÉDITER ICI : toute modification serait écrasée.
     Source unique de vérité : src/user_store.py
