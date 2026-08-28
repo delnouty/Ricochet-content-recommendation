@@ -49,6 +49,19 @@ class Recommender:
         with open(self.models_dir / "user_clicks.pkl", "rb") as f:
             self.user_clicks: dict[int, np.ndarray] = pickle.load(f)
 
+        # Un identifiant hors catalogue ferait échouer l'indexation des embeddings
+        # (IndexError). Cas réel : artefacts d'historique et catalogue
+        # désynchronisés — par exemple après un ajout d'articles suivi d'une
+        # reconstruction sur un catalogue plus petit.
+        hors_catalogue = 0
+        for user_id, articles in list(self.user_clicks.items()):
+            valides = articles[articles < self.n_articles]
+            if valides.size != articles.size:
+                hors_catalogue += int(articles.size - valides.size)
+                self.user_clicks[user_id] = valides
+        if hors_catalogue:
+            print(f"[recommender] {hors_catalogue} clic(s) hors catalogue ignoré(s)")
+
         # Articles les plus populaires (article_id triés par popularité décroissante).
         self.popular_articles = np.load(self.models_dir / "popular_articles.npy")
 
@@ -101,8 +114,19 @@ class Recommender:
 
     # ------------------------------------------------------------------ utils
     def _seen(self, user_id: int) -> np.ndarray:
-        """Articles déjà cliqués par l'utilisateur (vide si inconnu)."""
-        return self.user_clicks.get(user_id, np.array([], dtype=np.int64))
+        """Articles déjà cliqués par l'utilisateur (vide si inconnu).
+
+        Les identifiants hors catalogue sont écartés ici, et non seulement au
+        chargement : `user_clicks` est un dictionnaire public, que l'application
+        alimente après coup avec l'historique des clients inscrits
+        (`sync_store_into_model`). Un identifiant obsolète y provoquerait un
+        `IndexError` à l'indexation des embeddings.
+        """
+        seen = self.user_clicks.get(user_id)
+        if seen is None or len(seen) == 0:
+            return np.array([], dtype=np.int64)
+        seen = np.asarray(seen, dtype=np.int64)
+        return seen[(seen >= 0) & (seen < self.n_articles)]
 
     def _candidates(self, fresh_only: bool, n: int) -> np.ndarray | None:
         """Vivier de candidats : articles récents, ou None pour tout le catalogue.
@@ -116,6 +140,18 @@ class Recommender:
         # échouer l'indexation : on le filtre.
         pool = self.popular_recent[self.popular_recent < self.n_articles]
         return pool if pool.size > n else None
+
+    @staticmethod
+    def _argtop(scores: np.ndarray, n: int) -> np.ndarray:
+        """Indices des n meilleurs scores finis, du meilleur au moins bon.
+
+        Les scores à -inf (articles exclus) sont écartés : on préfère renvoyer moins
+        de n articles qu'un article déjà lu.
+        """
+        k = min(n, scores.size)
+        idx = np.argpartition(-scores, k - 1)[:k]
+        idx = idx[np.argsort(-scores[idx])]
+        return idx[np.isfinite(scores[idx])]
 
     @staticmethod
     def _top_n(scores: np.ndarray, exclude: np.ndarray, n: int) -> list[int]:
@@ -158,10 +194,7 @@ class Recommender:
         # catalogue entier contre 0,0390 sur un vivier de 6 h).
         scores = self.embeddings[pool] @ profile
         scores[np.isin(pool, seen)] = -np.inf
-        k = min(n, scores.size)
-        idx = np.argpartition(-scores, k - 1)[:k]
-        idx = idx[np.argsort(-scores[idx])]
-        return [int(a) for a in pool[idx[np.isfinite(scores[idx])]]]
+        return [int(a) for a in pool[self._argtop(scores, n)]]
 
     def _collaborative(self, user_id: int, n: int,
                        pool: np.ndarray | None = None) -> list[int] | None:
@@ -173,15 +206,16 @@ class Recommender:
 
         if pool is not None:
             # On restreint aux colonnes dont l'article est dans le vivier récent.
+            # Même si le vivier contient peu d'articles connus du modèle : renvoyer
+            # moins de n articles frais est correct, retomber sur le catalogue
+            # entier serait un contournement silencieux de la fraîcheur demandée.
             garde = np.isin(self.cf_item_ids, pool)
-            if garde.sum() > n:
-                ids = self.cf_item_ids[garde]
-                sous_scores = scores[garde].copy()
-                sous_scores[np.isin(ids, seen)] = -np.inf
-                k = min(n, sous_scores.size)
-                idx = np.argpartition(-sous_scores, k - 1)[:k]
-                idx = idx[np.argsort(-sous_scores[idx])]
-                return [int(a) for a in ids[idx[np.isfinite(sous_scores[idx])]]]
+            if not garde.any():
+                return None      # aucun article frais connu : cold start assumé
+            ids = self.cf_item_ids[garde]
+            sous_scores = scores[garde].copy()
+            sous_scores[np.isin(ids, seen)] = -np.inf
+            return [int(a) for a in ids[self._argtop(sous_scores, n)]]
 
         # Les facteurs sont indexés par colonne -> on masque puis on remappe.
         order = self._top_n(scores, self._to_cf_cols(seen), n)
@@ -201,14 +235,12 @@ class Recommender:
 
         if pool is not None:
             garde = np.isin(self.svd_item_ids, pool)
-            if garde.sum() > n:
-                ids = self.svd_item_ids[garde]
-                sous = scores[garde].copy()
-                sous[np.isin(ids, seen)] = -np.inf
-                k = min(n, sous.size)
-                idx = np.argpartition(-sous, k - 1)[:k]
-                idx = idx[np.argsort(-sous[idx])]
-                return [int(a) for a in ids[idx[np.isfinite(sous[idx])]]]
+            if not garde.any():
+                return None
+            ids = self.svd_item_ids[garde]
+            sous = scores[garde].copy()
+            sous[np.isin(ids, seen)] = -np.inf
+            return [int(a) for a in ids[self._argtop(sous, n)]]
 
         order = self._top_n(scores, self._to_svd_cols(seen), n)
         return self.svd_item_ids[order].tolist()
@@ -245,16 +277,17 @@ class Recommender:
         if self._has_cf and user_id in self.cf_user_index:
             row = self.cf_user_index[user_id]
             cf_raw = self.cf_item_factors @ self.cf_user_factors[row]
-            cf_full = np.zeros(self.n_articles, dtype=np.float32)
+            # Les articles absents du modèle ALS (87 % du catalogue) reçoivent le
+            # **minimum** de l'échelle, pas 0 : avec 0, un article inconnu se
+            # classerait devant les 43 % d'articles que le modèle note négativement,
+            # c'est-à-dire devant ceux qu'il déconseille explicitement.
+            cf_full = np.full(self.n_articles, cf_raw.min(), dtype=np.float32)
             cf_full[self.cf_item_ids] = cf_raw
             combined = alpha * combined + (1 - alpha) * _minmax(cf_full[indices])
 
         scores = combined.astype(np.float32)
         scores[np.isin(indices, seen)] = -np.inf
-        k = min(n, scores.size)
-        idx = np.argpartition(-scores, k - 1)[:k]
-        idx = idx[np.argsort(-scores[idx])]
-        return [int(a) for a in indices[idx[np.isfinite(scores[idx])]]]
+        return [int(a) for a in indices[self._argtop(scores, n)]]
 
     # ----------------------------------------------------------------- public
     def recommend(self, user_id: int, n: int = 5, method: str = "hybrid",
@@ -281,37 +314,73 @@ class Recommender:
         # Les quatre stratégies acceptent le vivier : sans cela, la stratégie par
         # défaut (hybrid) continuerait de choisir dans tout le catalogue.
         pool = self._candidates(fresh_only, n)
-        result = dispatch[method](user_id, n, pool)
-        if result:
-            return result
-        return self._popularity_fallback(user_id, n, region, fresh_only)
+        result = dispatch[method](user_id, n, pool) or []
+
+        if len(result) >= n:
+            return result[:n]
+
+        # Complément : une stratégie restreinte à un vivier peut épuiser ses
+        # candidats (lecteur assidu, vivier étroit). On complète avec le repli
+        # populaire plutôt que de servir une liste courte — voire vide.
+        complement = self._popularity_fallback(user_id, n + len(result), region,
+                                               fresh_only)
+        for article in complement:
+            if article not in result:
+                result.append(article)
+            if len(result) == n:
+                break
+        return result
 
     def _popularity_fallback(self, user_id: int, n: int, region: int | None = None,
                              fresh_only: bool = True) -> list[int]:
-        """Articles populaires : d'abord la région, puis la fenêtre récente, puis tout.
+        """Articles populaires, par **cascade** de classements complémentaires.
 
-        Ordre de préférence délibéré. La popularité **récente** est de loin la plus
-        précise (0,2525 contre 0,0010 sur tout l'historique) ; la popularité
-        régionale reste prioritaire quand la région est connue, car elle ajoute la
-        seule information disponible sur un lecteur inconnu.
+        Deux principes, tirés des mesures :
+
+        1. la fraîcheur d'abord (0,2525 contre 0,0010 sur tout l'historique) ;
+        2. **jamais de liste vide**. Chaque classement est épuisable : un lecteur
+           assidu peut avoir lu tous les articles de la fenêtre. On enchaîne donc
+           les classements jusqu'à réunir n articles, en terminant par la popularité
+           sur tout l'historique, qui compte des dizaines de milliers d'articles.
+
+        La région intervient **à l'intérieur** de la fenêtre récente quand c'est
+        possible : c'est la seule façon d'utiliser les deux signaux à la fois.
+        Croiser région et fraîcheur dès la construction des artefacts serait plus
+        propre (voir docs/architecture.md §4.c) ; ce croisement à la lecture est en
+        attendant ce qui évite d'ignorer purement et simplement la région.
         """
         seen = set(self._seen(user_id).tolist())
+        frais = set(int(a) for a in self.popular_recent) if fresh_only else set()
 
-        # Ordre : fraîcheur, puis région, puis historique complet. La fraîcheur
-        # passe devant car elle est mesurée bien supérieure (0,2525 contre 0,0010) ;
-        # `popular_by_region` est calculé sur tout l'historique et souffre donc du
-        # même défaut que `popular_articles`. Le calculer aussi sur la fenêtre est
-        # la suite logique (voir docs/architecture.md §4.c).
-        ranking = None
-        if fresh_only and self.popular_recent.size > n:
-            ranking = self.popular_recent
-        if ranking is None:
-            ranking = self._region_ranking(region, n, seen)
-        if ranking is None:
-            ranking = self.popular_articles
+        classements: list[np.ndarray] = []
+        region_ranking = self._region_ranking(region, n, seen)
 
-        out = [int(a) for a in ranking if a not in seen]
-        return out[:n]
+        if region_ranking is not None and frais:
+            # Articles de la région **présents dans la fenêtre**, dans l'ordre de
+            # popularité régionale : les deux signaux sont respectés.
+            croise = np.array([a for a in region_ranking if int(a) in frais],
+                              dtype=np.int64)
+            if croise.size:
+                classements.append(croise)
+
+        if fresh_only and self.popular_recent.size:
+            classements.append(self.popular_recent)
+        if region_ranking is not None:
+            classements.append(region_ranking)
+        classements.append(self.popular_articles)
+
+        out: list[int] = []
+        deja = set(seen)
+        for ranking in classements:
+            for article in ranking:
+                article = int(article)
+                if article in deja:
+                    continue
+                out.append(article)
+                deja.add(article)
+                if len(out) == n:
+                    return out
+        return out
 
     def _region_ranking(self, region: int | None, n: int,
                         seen: set[int]) -> np.ndarray | None:

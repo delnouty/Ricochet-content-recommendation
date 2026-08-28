@@ -291,12 +291,22 @@ def view_recommendations(reco: Recommender, store: UserStore, meta: dict) -> Non
         with st.expander(f"Historique de lecture ({len(history)} article(s))"):
             for article_id in history[-10:][::-1]:
                 st.write("•", describe(int(article_id), meta))
-    elif region is not None and region in reco.popular_by_region:
-        st.info(f"Aucun historique : ce client reçoit les articles les plus lus de "
-                f"la région {region} (cold start contextuel).")
     else:
-        st.info("Aucun historique : ce client reçoit les articles populaires "
-                "(cold start, popularité mondiale).")
+        # Le message doit décrire ce que le moteur fait réellement : la cascade de
+        # repli croise région et fraîcheur quand les deux sont disponibles, sinon
+        # elle utilise ce qui existe. Annoncer « articles de votre région » alors
+        # que le moteur sert des articles frais serait faux.
+        a_region = region is not None and region in reco.popular_by_region
+        a_frais = fresh_only and reco.popular_recent.size > 0
+        if a_region and a_frais:
+            origine = f"les articles récents les plus lus dans la région {region}"
+        elif a_frais:
+            origine = "les articles les plus lus de la fenêtre récente"
+        elif a_region:
+            origine = f"les articles les plus lus de la région {region}"
+        else:
+            origine = "les articles les plus lus de tout l'historique"
+        st.info(f"Aucun historique : ce client reçoit {origine} (cold start).")
 
     if store.name_of(user_id) and user_id not in getattr(reco, "cf_user_index", {}):
         st.caption("Client inscrit localement : absent des facteurs ALS, le "
