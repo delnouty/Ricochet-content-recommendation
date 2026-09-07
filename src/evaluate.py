@@ -48,8 +48,22 @@ def split_by_time(clicks: pd.DataFrame, train: float = 0.6, val: float = 0.2
 
 
 def build_artifacts(clicks_train: pd.DataFrame, source_models: Path, out_dir: Path,
-                    factors: int = 50, with_svd: bool = True) -> None:
-    """Construit tous les artefacts à partir de la **seule** période d'entraînement."""
+                    factors: int = 50, with_svd: bool = True,
+                    svd_negatives: int = 4) -> None:
+    """Construit tous les artefacts à partir de la **seule** période d'entraînement.
+
+    `svd_negatives` fixe la variante de note du SVD, et ce choix n'est pas neutre :
+    le notebook 06 a comparé trois définitions et deux échouent. Les étoiles de
+    l'article (note identique pour tous les lecteurs) donnent 0,0000 en HitRate@5,
+    parce que le modèle apprend « quels articles sont lus », pas « par qui ». Seule
+    la variante binaire avec négatifs échantillonnés classe : 4 négatifs par
+    positif donnent 0,0755 sur validation.
+
+    Cette fonction construisait auparavant la variante « étoiles », c'est-à-dire
+    celle que l'étude rejette. La mesure de référence rapportait donc 0,0000 pour
+    le SVD — un chiffre exact pour un modèle que personne n'aurait déployé.
+    Mettre 0 ici reproduit cet ancien comportement.
+    """
     from src.prepare_model import (build_article_stars, build_collaborative,
                                    build_segment_popularity, build_user_artifacts)
 
@@ -71,9 +85,17 @@ def build_artifacts(clicks_train: pd.DataFrame, source_models: Path, out_dir: Pa
     build_collaborative(clicks_train, out_dir, factors)
 
     if with_svd:
-        from src.collaborative_surprise import (build_ratings_from_stars,
+        from src.collaborative_surprise import (add_negative_samples,
+                                                build_ratings,
+                                                build_ratings_from_stars,
                                                 save_artifacts, train_svd)
-        notes = build_ratings_from_stars(clicks_train, out_dir)
+        if svd_negatives > 0:
+            # Variante retenue : positifs issus des clics, ramenés au binaire par
+            # l'ajout de négatifs (articles non lus, note 0).
+            notes = add_negative_samples(build_ratings(clicks_train),
+                                         svd_negatives)
+        else:
+            notes = build_ratings_from_stars(clicks_train, out_dir)
         algo, trainset = train_svd(notes, n_factors=factors, n_epochs=20)
         save_artifacts(algo, trainset, out_dir)
 
@@ -93,8 +115,28 @@ def evaluate(models_dir: Path, clicks_history: pd.DataFrame, clicks_eval: pd.Dat
        réglés sur la validation). Comparer une méthode réglée à des méthodes par
        défaut fausse la conclusion.
 
-    Les valeurs par défaut sont les optima mesurés : popularité sur 1 h, contenu sur
-    un vivier de 6 h, ALS entraîné sur 24 h avec 16 facteurs.
+    Les valeurs par défaut sont les optima mesurés sur la **validation** :
+    popularité sur 1 h, contenu sur un vivier de 6 h, ALS entraîné sur 24 h avec
+    16 facteurs.
+
+    Pourquoi 24 h et non 72 h. Les notebooks 05 et 07 ont balayé les deux réglages
+    de l'ALS **séparément** : la fenêtre à 50 facteurs (72 h : 0,0200 contre 0,0175
+    à 24 h), puis les facteurs à 24 h (16 : 0,0345 contre 0,0175 à 50). Combiner
+    les deux gagnants — 72 h et 16 facteurs — paraissait naturel. Le balayage
+    croisé sur validation montre que non : les deux effets interagissent, et cette
+    combinaison est la **pire** des quatre.
+
+    | fenêtre | facteurs | HitRate@5 (validation) |
+    |---|---|---|
+    | 24 h | 16 | **0,0345** |
+    | 72 h | 50 | 0,0200 |
+    | 24 h | 50 | 0,0175 |
+    | 72 h | 16 | 0,0110 |
+
+    Lecture : un modèle petit (16 facteurs) a besoin d'un signal dense pour placer
+    ses facteurs ; l'élargissement à 72 h dilue les co-lectures sur trois fois plus
+    d'articles et lui retire cette densité. La configuration se choisit donc en
+    croisant les réglages, jamais en juxtaposant des optima partiels.
     """
     from src import experiments as xp
     from src.recommender import Recommender
@@ -145,6 +187,15 @@ def main() -> int:
                         help="période d'évaluation (garder « test » pour la mesure finale)")
     parser.add_argument("--n", default=5, type=int)
     parser.add_argument("--factors", default=50, type=int)
+    # Réglages de l'ALS exposés en ligne de commande : sans eux, la configuration
+    # présentée en soutenance (72 h) n'était pas reproductible sans modifier le
+    # code, et le chiffre du rapport n'aurait pas eu de commande pour le refaire.
+    parser.add_argument("--als-hours", default=24, type=float,
+                        help="fenêtre d'entraînement de l'ALS, en heures "
+                             "(défaut 24 : optimum du balayage croisé sur validation)")
+    parser.add_argument("--als-factors", default=16, type=int,
+                        help="nombre de facteurs latents de l'ALS "
+                             "(défaut 16 : optimum mesuré sur validation)")
     parser.add_argument("--max-users", default=2000, type=int)
     parser.add_argument("--skip-build", action="store_true",
                         help="réutiliser les artefacts déjà construits")
@@ -181,7 +232,8 @@ def main() -> int:
     print(f"\n=== évaluation sur la période « {args.split} » "
           f"({len(historique):,} clics d'historique) ===")
     resultats = evaluate(args.out_dir, historique, evaluation, n=args.n,
-                         max_users=args.max_users)
+                         max_users=args.max_users,
+                         als_hours=args.als_hours, als_factors=args.als_factors)
     print()
     print(resultats.to_string())
 

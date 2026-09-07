@@ -22,6 +22,8 @@
 \usepackage{fontspec}
 \usepackage{polyglossia}
 \setdefaultlanguage{french}
+\usepackage{graphicx}
+\graphicspath{{./}}
 \usepackage{booktabs}
 \usepackage{array}
 \usepackage{tikz}
@@ -163,15 +165,20 @@
   \begin{itemize}
     \item Traite toutes les cases vides comme des \textbf{négatifs pondérés} :
           formulation adaptée à des clics, pas à des notes.
-    \item Réglages mesurés sur validation — les deux pointent dans le même sens :
+    \item Deux réglages balayés \textbf{séparément} sur validation : la fenêtre
+          d'entraînement (72 h : 0,0200 contre 0,0175 à 24 h) puis le nombre de
+          facteurs (16 : 0,0345 contre 0,0175 à 50).
+    \item Combiner les deux gagnants — 72 h \emph{et} 16 facteurs — paraissait
+          évident. Le balayage \pointfort{croisé} dit le contraire :
       \begin{itemize}
-        \item fenêtre d'entraînement \textbf{72 h} (0,0200) plutôt que tout
-              l'historique (0,0120) ;
-        \item \textbf{16 facteurs} latents (0,0345) plutôt que 100 (0,0125).
+        \item 24 h + 16 facteurs : \textbf{0,0345} — retenu ;
+        \item 72 h + 16 facteurs : \textbf{0,0110} — la pire des quatre.
       \end{itemize}
-    \item \pointfort{Moins de données, plus récentes, et un modèle plus petit}
-          valent mieux qu'un gros modèle appris sur dix jours d'actualité.
-    \item Résultat sur test : HitRate@5 = \textbf{0,0415}, personnalisation 95 \%.
+    \item Un modèle à 16 facteurs a besoin d'un signal \emph{dense} ; élargir à
+          72 h dilue les co-lectures et le prive de cette densité. Les réglages
+          \pointfort{interagissent} : on ne juxtapose pas des optima partiels.
+    \item Résultat sur test, configuration retenue : HitRate@5 = \textbf{0,0415},
+          personnalisation 95 \%.
   \end{itemize}
   \aretenir{Limite structurelle : un article publié il y a deux heures n'a presque
     aucune co-lecture — le collaboratif ne peut pas le proposer.}
@@ -189,7 +196,7 @@
     Étoiles de l'article (log des clics) & 0,0000 & 12 \% &
       reproduit la popularité \\
     Binaire + 1 négatif échantillonné   & 0,0080 & 46 \% & insuffisant \\
-    Binaire + 4 négatifs échantillonnés & 0,0755\,$^*$ & 34 \% &
+    Binaire + 4 négatifs échantillonnés & 0,0815\,$^*$ & 34 \% &
       meilleure variante \\
     \bottomrule
   \end{tabular}
@@ -202,8 +209,10 @@
     \item Les étoiles échouent parce que la note ne dépend que de l'article : le
           biais article capte tout le signal, et le modèle apprend « quels articles
           sont lus », pas « qui lit quoi ».
-    \item $^*$ mesuré sur validation ; ce réglage \textbf{ne s'est pas reproduit}
-          sur le test (0,0160) — d'où l'utilité d'une période de test intacte.
+    \item $^*$ mesuré sur validation ; sur le test, la même variante s'effondre à
+          \textbf{0,0005} — un facteur 160. Le réglage \pointfort{ne s'est pas
+          reproduit} : c'est précisément ce qu'une période de test intacte sert à
+          révéler.
   \end{itemize}
 \end{frame}
 
@@ -238,23 +247,12 @@
 \begin{frame}{Résultat principal : la fraîcheur pèse plus que le modèle}
   \framesubtitle{Même algorithme, deux fenêtres de comptage}
   \centering
-  \small
-  \begin{tabular}{@{}lrr@{}}
-    \toprule
-    \textbf{Fenêtre de comptage des clics} & \textbf{Candidats} &
-    \textbf{HitRate@5} \\
-    \midrule
-    1 heure                      &    791 & \textbf{0,2190} \\
-    6 heures                     &  2 657 & 0,1480 \\
-    24 heures                    &  6 777 & 0,1060 \\
-    Tout l'historique (240 h)    & 29 118 & \textbf{0,0075} \\
-    \bottomrule
-  \end{tabular}
+  \includegraphics[width=0.97\textwidth]{figures/fraicheur.pdf}
 
-  \vspace{0.8em}
-  \raggedright\small
-  \begin{itemize}\itemsep3pt
-    \item \pointfort{Facteur 250} entre la première et la dernière ligne, sans
+  \vspace{0.3em}
+  \raggedright\footnotesize
+  \begin{itemize}\itemsep2pt
+    \item \pointfort{Facteur 250} entre la première et la dernière barre, sans
           changer une ligne d'algorithme.
     \item Explication : \textbf{48 \%} des articles lus pendant la période évaluée
           n'existaient pas encore pendant l'entraînement.
@@ -293,49 +291,44 @@
 \begin{frame}{Résultat final sur la période de test}
   \framesubtitle{Chaque approche dans sa meilleure configuration}
   \centering
-  \scriptsize
-  \begin{tabular}{@{}lrrr@{}}
-    \toprule
-    \textbf{Configuration} & \textbf{HitRate@5} & \textbf{Couverture} &
-    \textbf{Person.} \\
-    \midrule
-    Popularité 1 h                        & \textbf{0,2525} & 0,003 \% &  4 \% \\
-    \textbf{Mixte : 4 populaires + 1 contenu} & \textbf{0,2500} & 0,116 \% & 22 \% \\
-    ALS (72 h, 16 facteurs)               & 0,0415 & 0,015 \% & 95 \% \\
-    Contenu (vivier 6 h)                  & 0,0200 & \textbf{0,268 \%} & 96 \% \\
-    SVD Surprise (binaire + négatifs)     & 0,0160 & 0,010 \% & 53 \% \\
-    \bottomrule
-  \end{tabular}
+  \includegraphics[width=0.97\textwidth]{figures/compromis.pdf}
 
-  \vspace{0.8em}
-  \raggedright\small
-  \begin{itemize}\itemsep3pt
-    \item Retenu : \pointfort{4 populaires (1 h) + 1 contenu}. La place accordée au
-          contenu ne coûte rien en précision (0,2500 contre 0,2525, écart non
-          significatif) et \textbf{multiplie la couverture par 38}.
-    \item Une place donnée à l'ALS coûterait 3,7 \% de précision pour un gain de
-          couverture neuf fois plus faible : il reste disponible, mais n'est pas
-          servi.
+  \vspace{0.3em}
+  \raggedright\footnotesize
+  \begin{itemize}\itemsep2pt
+    \item Retenu : \pointfort{4 populaires (1 h) + 1 contenu} — la place donnée au
+          contenu ne coûte rien en précision (écart non significatif) et
+          \textbf{multiplie la couverture par 38}.
+    \item Une place donnée à l'ALS coûterait 3,7 \% de précision pour neuf fois
+          moins de couverture : il reste disponible, mais n'est pas servi.
   \end{itemize}
 \end{frame}
 
 % ═════════════════ PARTIE 2 — Fonctionnalités (6 min, 5 diapos) ═══════════
 \begin{frame}{Partie 2 — Les stratégies dans l'application}
-  \framesubtitle{6 minutes \textperiodcentered\ ce que l'utilisateur peut faire}
-  \small
-  \begin{itemize}
-    \item L'application expose les \textbf{cinq stratégies} : on bascule en direct
-          et les listes diffèrent visiblement.
-      \begin{itemize}
-        \item « Production » — 4 populaires (1 h) + 1 contenu : ce qui est servi ;
-        \item « Contenu », « ALS », « SVD Surprise », « Hybride » : pour comparaison.
-      \end{itemize}
-    \item Une case \pointfort{« Limiter aux articles récents »}, activée par
-          défaut : la décocher montre en direct l'effet mesuré en partie 1.
-    \item Le nombre d'articles est réglable de 1 à 10.
-    \item Chaque article affiche sa \textbf{note en étoiles} et son nombre de
-          lecteurs — les seules informations réelles disponibles sur un jeu
-          anonymisé.
+  \framesubtitle{6 minutes \textperiodcentered\ le même lecteur, une seule case
+    décochée}
+  \begin{columns}[t]
+    \begin{column}{0.485\textwidth}
+      \centering\scriptsize
+      \textbf{Fraîcheur activée} — fenêtre 1 h\\[3pt]
+      \includegraphics[width=\linewidth]{figures/app_liste_fraiche.png}
+    \end{column}
+    \begin{column}{0.485\textwidth}
+      \centering\scriptsize
+      \textcolor{gris}{Fraîcheur désactivée} — tout le catalogue\\[3pt]
+      \includegraphics[width=\linewidth]{figures/app_liste_sans_fraicheur.png}
+    \end{column}
+  \end{columns}
+
+  \vspace{0.4em}
+  \raggedright\scriptsize
+  \begin{itemize}\itemsep1pt
+    \item À gauche, le 16/10 et 3 784 à 10 627 lecteurs ; à droite, le 25/09 et un
+          article lu par \textbf{une} personne — \pointfort{le facteur 250, rendu
+          visible}.
+    \item Cinquième place à gauche : \#284220 du \textbf{17/10}, neuf lecteurs.
+          C'est la place du contenu, et la popularité ne la trouverait jamais.
   \end{itemize}
 \end{frame}
 
@@ -367,21 +360,31 @@
 
 \begin{frame}{Inscrire un lecteur, voir son profil se former}
   \framesubtitle{En direct, sans ré-entraînement}
-  \small
-  \begin{itemize}
-    \item L'application permet d'\textbf{inscrire un lecteur}, de lui donner un
-          profil de départ, puis de marquer des articles comme lus.
-    \item À chaque lecture enregistrée les recommandations changent : le profil est
-          la moyenne des vecteurs lus, recalculée à la demande.
-    \item Un onglet \textbf{catalogue} (364 047 articles, quatre tris, filtre par
-          note) permet de cliquer autre chose que les cinq suggestions —
-      \begin{itemize}
-        \item sans lui, le lecteur ne pourrait cliquer que ce que le modèle propose
-              déjà, et son profil ne ferait que se renforcer dans sa direction
-              initiale.
-      \end{itemize}
-    \item Côté service, l'historique est \pointfort{transmis dans la requête} : le
-          service recommande un lecteur qu'il ne connaît pas, sans conserver d'état.
+  \begin{columns}[t]
+    \begin{column}{0.47\textwidth}
+      \centering\scriptsize
+      \textbf{Inscription} — région optionnelle\\[3pt]
+      \includegraphics[width=\linewidth, height=0.40\textheight,
+                       keepaspectratio]{figures/app_bloc_inscription.png}
+    \end{column}
+    \begin{column}{0.47\textwidth}
+      \centering\scriptsize
+      \textbf{Catalogue} — 364 047 articles\\[3pt]
+      \includegraphics[width=\linewidth, height=0.40\textheight,
+                       keepaspectratio]{figures/app_bloc_catalogue.png}
+    \end{column}
+  \end{columns}
+
+  \vspace{0.4em}
+  \raggedright\scriptsize
+  \begin{itemize}\itemsep1pt
+    \item Recommandations \textbf{immédiates} à l'inscription ; à chaque article lu,
+          le profil — moyenne des vecteurs lus — est recalculé à la demande,
+          \pointfort{sans ré-entraînement}.
+    \item Le catalogue a une raison d'être : sans lui, le lecteur ne cliquerait que
+          ce que le modèle propose déjà, et son profil ne ferait que se renforcer.
+    \item L'historique est \pointfort{transmis dans la requête} : la Function
+          recommande un lecteur qu'elle ne connaît pas, sans état.
   \end{itemize}
 \end{frame}
 
@@ -445,15 +448,15 @@
   \framesubtitle{2 minutes \textperiodcentered\ un cœur, trois déploiements indépendants}
   \centering
   \begin{tikzpicture}[every node/.style={font=\scriptsize, align=center, text=white},
-      bloc/.style={draw=primary, thick, rounded corners, text width=3.2cm,
+      bloc/.style={draw=primary, thick, rounded corners, text width=2.9cm,
                    minimum height=1.3cm}]
-    \node[bloc, fill=primary, text width=6cm, minimum height=0.9cm] (art)
+    \node[bloc, fill=primary, text width=5cm, minimum height=0.9cm] (art)
       {Artefacts produits hors-ligne (ACP, ALS, SVD, fenêtres)};
-    \node[bloc, fill=accent,  below left=1cm and 1.2cm of art] (az)
+    \node[bloc, fill=accent,  below left=1cm and 0.3cm of art] (az)
       {Azure Function\\+ Blob Storage\\\vspace{2pt}en ligne, 0,2 s};
     \node[bloc, fill=accent2, below=1cm of art] (hf)
       {Hugging Face Space\\+ HF Hub\\\vspace{2pt}démo publique};
-    \node[bloc, fill=vert, below right=1cm and 1.2cm of art] (loc)
+    \node[bloc, fill=vert, below right=1cm and 0.3cm of art] (loc)
       {Application locale\\artefacts sur disque\\\vspace{2pt}aucun cloud};
     \draw[-{Latex[length=2mm]}, gris, thick] (art) -- (az);
     \draw[-{Latex[length=2mm]}, gris, thick] (art) -- (hf);
@@ -467,12 +470,11 @@
           \textbf{générées}, et la CI vérifie qu'elles sont à jour.
     \item À l'inférence, aucune bibliothèque d'apprentissage : \pointfort{numpy
           seul}. scikit-learn, implicit et Surprise ne servent qu'hors-ligne.
-    \item Architecture 2 retenue pour le MVP : la Function lit les artefacts dans
-          Blob Storage, sans API intermédiaire.
-    \item Deux accès à Blob : \pointfort{binding} sur les 23~Ko de fraîcheur —
-          relus à chaque appel, donc mise à jour horaire 	extbf{sans
-          redémarrage} — et SDK avec cache sur les 254~Mo d'artefacts lourds,
-          où le binding coûterait 40$	imes$ plus par requête.
+    \item Architecture 2 retenue pour le MVP : la Function lit Blob Storage sans
+          API intermédiaire, avec \pointfort{deux accès selon la cadence} —
+          \emph{binding} sur les 23~Ko de fraîcheur, relus à chaque appel donc
+          mise à jour horaire sans redémarrage ; SDK avec cache sur les 254~Mo
+          d'artefacts lourds, où le binding coûterait 40 fois plus par requête.
   \end{itemize}
 \end{frame}
 

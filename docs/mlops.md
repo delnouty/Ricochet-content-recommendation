@@ -92,8 +92,16 @@ python scripts/check_metrics.py --candidate metrics.json --tolerance 0.10
   **versionnée dans git** : sans cela, elle suivrait la dérive du modèle et ne
   protégerait plus rien.
 
-Référence actuelle : `popularité 1 h`, HitRate@5 = **0,2525**, Recall@5 = 0,0554
-(période de test, 2 000 lecteurs).
+Référence actuelle : `popularité 1 h`, HitRate@5 = **0,2525**, Recall@5 = 0,0555
+(période de test, 2 000 lecteurs). Régénérer avec :
+
+```bash
+python -m src.evaluate --split test --skip-build --json models/baseline_metrics.json
+```
+
+Ne pas la mettre à jour pour faire passer la porte : c'est le geste qui la vide de
+son sens. On la met à jour quand la configuration de référence change, et on dit
+laquelle.
 
 ## 6. Intégration continue
 
