@@ -8,7 +8,7 @@ avec le seul environnement virtuel du dépôt.
 Le contrat est identique à `azure_function/function_app.py` :
 
     GET/POST /api/recommend?user_id=<int>&n=<int>&method=<mix|content|collab|svd|hybrid>
-                           [&region=<int>]
+                           [&region=<int>][&fresh_only=<0|1>][&history=<id,id,...>]
     -> {"user_id": 0, "method": "hybrid", "recommendations": [id1, ..., id5]}
 
 Mêmes codes d'erreur (400 sur paramètre manquant / non entier / méthode
@@ -113,8 +113,29 @@ class _Handler(BaseHTTPRequestHandler):
         except (TypeError, ValueError):
             return self._json(400, {"error": "'region' doit être un entier"})
 
+
+        # Fraîcheur : le levier le plus fort du projet (facteur 250 sur la précision).
+        # Exposé en paramètre pour que le client puisse démontrer l'écart, mais activé
+        # par défaut — c'est la configuration servie en production.
+        raw_fresh = params.get("fresh_only")
+        fresh_only = str(raw_fresh).lower() not in ("0", "false", "non", "no")
+
+
+        # Historique transmis par l'appelant : rend le service utilisable sans état.
+        # Un lecteur inscrit à l'instant dans l'application cliente est inconnu des
+        # artefacts ; sans cela il ne recevrait que de la popularité.
+        raw_history = params.get("history")
+        history = None
+        if raw_history:
+            try:
+                history = [int(a) for a in str(raw_history).split(",") if a.strip()]
+            except ValueError:
+                return self._json(400, {"error": "'history' doit être une liste "
+                                                    "d'entiers séparés par des virgules"})
+
         try:
-            recs = self.recommender.recommend(user_id, n=n, method=method, region=region)
+            recs = self.recommender.recommend(user_id, n=n, method=method, region=region,
+                                              fresh_only=fresh_only, history=history)
         except ValueError as exc:  # method inconnue
             return self._json(400, {"error": str(exc)})
         except Exception:  # noqa: BLE001

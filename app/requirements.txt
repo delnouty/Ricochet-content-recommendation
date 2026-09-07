@@ -1,2 +1,3 @@
 streamlit>=1.30
 requests>=2.31
+numpy>=1.24               # artefacts légers pour l'affichage (app_full.py)

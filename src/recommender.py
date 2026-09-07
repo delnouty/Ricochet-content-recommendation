@@ -30,6 +30,7 @@ articles les plus populaires. C'est le socle sur lequel s'appuie la réflexion
 from __future__ import annotations
 
 import pickle
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -40,6 +41,12 @@ class Recommender:
 
     def __init__(self, models_dir: str | Path):
         self.models_dir = Path(models_dir)
+
+        # Historique fourni par l'appelant, valable le temps d'une requête.
+        # Stocké par thread : les workers Azure exécutent les fonctions
+        # synchrones dans un pool, donc deux requêtes peuvent se chevaucher.
+        # Un attribut d'instance partagé mélangerait les profils.
+        self._local = threading.local()
 
         # --- Content-based ---------------------------------------------------
         # Embeddings réduits par ACP, indexés par article_id (ligne = article_id).
@@ -129,13 +136,21 @@ class Recommender:
     def _seen(self, user_id: int) -> np.ndarray:
         """Articles déjà cliqués par l'utilisateur (vide si inconnu).
 
+        Un historique passé à `recommend()` prime sur les artefacts : c'est ce qui
+        permet à un service sans état de recommander un lecteur qu'il ne connaît
+        pas — l'appelant transmet ce qu'il sait de lui.
+
         Les identifiants hors catalogue sont écartés ici, et non seulement au
         chargement : `user_clicks` est un dictionnaire public, que l'application
         alimente après coup avec l'historique des clients inscrits
         (`sync_store_into_model`). Un identifiant obsolète y provoquerait un
         `IndexError` à l'indexation des embeddings.
         """
-        seen = self.user_clicks.get(user_id)
+        fourni = getattr(self._local, "history", None)
+        if fourni is not None and fourni[0] == user_id:
+            seen = fourni[1]
+        else:
+            seen = self.user_clicks.get(user_id)
         if seen is None or len(seen) == 0:
             return np.array([], dtype=np.int64)
         seen = np.asarray(seen, dtype=np.int64)
@@ -340,7 +355,8 @@ class Recommender:
 
     # ----------------------------------------------------------------- public
     def recommend(self, user_id: int, n: int = 5, method: str = "mix",
-                  region: int | None = None, fresh_only: bool = True) -> list[int]:
+                  region: int | None = None, fresh_only: bool = True,
+                  history: list[int] | None = None) -> list[int]:
         """Renvoie `n` article_id recommandés pour `user_id`.
 
         method ∈ {"content", "collab", "hybrid"}. En l'absence d'historique
@@ -351,6 +367,19 @@ class Recommender:
         plutôt que la popularité mondiale. Ignoré dès qu'un historique existe, le
         contenu étant un signal bien plus fort.
         """
+        # `history` rend le service utilisable **sans état** : un lecteur absent des
+        # artefacts (inscrit à l'instant par l'application appelante) est recommandé
+        # à partir de l'historique transmis dans la requête. Sans ce mécanisme, seule
+        # la popularité serait possible pour lui.
+        if history is not None:
+            self._local.history = (user_id, np.asarray(history, dtype=np.int64))
+        try:
+            return self._dispatch(user_id, n, method, region, fresh_only)
+        finally:
+            self._local.history = None
+
+    def _dispatch(self, user_id: int, n: int, method: str, region: int | None,
+                  fresh_only: bool) -> list[int]:
         dispatch = {
             "mix": self._mix,
             "content": self._content_based,

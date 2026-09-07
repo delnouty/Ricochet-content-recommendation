@@ -8,6 +8,11 @@ Endpoint HTTP : GET/POST /api/recommend
               "mix" | "content" | "collab" | "svd" | "hybrid")
     - region  (int, optionnel) : code de région, utilisé uniquement pour le cold
               start (un lecteur inconnu reçoit la popularité de sa région)
+    - fresh_only (bool, défaut vrai) : limiter aux articles récents ; « 0 » ou
+              « false » élargit à tout le catalogue (utile pour comparer)
+    - history (str, optionnel) : article_id séparés par des virgules. Profil
+              transmis par l'appelant, prioritaire sur les artefacts — permet de
+              recommander un lecteur que le service ne connaît pas
 
 Réponse JSON :
     {"user_id": 123, "method": "hybrid", "recommendations": [id1, ..., id5]}
@@ -81,8 +86,32 @@ def recommend(req: func.HttpRequest) -> func.HttpResponse:
             status_code=400, mimetype="application/json",
         )
 
+
+    # Fraîcheur : le levier le plus fort du projet (facteur 250 sur la précision).
+    # Exposé en paramètre pour que le client puisse démontrer l'écart, mais activé
+    # par défaut — c'est la configuration servie en production.
+    raw_fresh = _param(req, "fresh_only", body)
+    fresh_only = str(raw_fresh).lower() not in ("0", "false", "non", "no")
+
+
+    # Historique transmis par l'appelant : rend le service utilisable sans état.
+    # Un lecteur inscrit à l'instant dans l'application cliente est inconnu des
+    # artefacts ; sans cela il ne recevrait que de la popularité.
+    raw_history = _param(req, "history", body)
+    history = None
+    if raw_history:
+        try:
+            history = [int(a) for a in str(raw_history).split(",") if a.strip()]
+        except ValueError:
+            return func.HttpResponse(
+                json.dumps({"error": "'history' doit être une liste d'entiers "
+                                     "séparés par des virgules"}),
+                status_code=400, mimetype="application/json",
+            )
+
     try:
-        recs = _get_recommender().recommend(user_id, n=n, method=method, region=region)
+        recs = _get_recommender().recommend(user_id, n=n, method=method, region=region,
+                                            fresh_only=fresh_only, history=history)
     except ValueError as exc:  # method inconnue
         return func.HttpResponse(
             json.dumps({"error": str(exc)}),

@@ -1,0 +1,532 @@
+% Support de soutenance Ricochet — Beamer.
+%
+% Structure imposée par le brief, et budget de temps respecté par le nombre de
+% diapositives :
+%
+%   | Partie                                | Temps  | Diapositives |
+%   | Approches de modélisation testées     | 10 min |      8       |
+%   | Fonctionnalités du système dans l'app |  6 min |      5       |
+%   | Architecture technique cible          |  2 min |      2       |
+%   | Démonstration de l'application        |  2 min |      1       |
+%
+% Compilation (deux passes pour la table des matières) :
+%   latexmk -pdf -xelatex docs/presentation.tex
+% ou :
+%   xelatex -output-directory=docs docs/presentation.tex   (deux fois)
+%
+% XeLaTeX plutôt que pdfLaTeX : le texte contient des caractères (★, ×, —) et une
+% typographie française qui passent mal en encodage historique.
+
+\documentclass[aspectratio=169, 11pt]{beamer}
+
+\usepackage{fontspec}
+\usepackage{polyglossia}
+\setdefaultlanguage{french}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning}
+
+% --- Thème sobre : pas de fioritures, le contenu porte le propos -------------
+\usetheme{default}
+\usecolortheme{default}
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{itemize items}[circle]
+
+\definecolor{primary}{RGB}{31,58,95}
+\definecolor{accent}{RGB}{46,134,193}
+\definecolor{accent2}{RGB}{230,126,34}
+\definecolor{vert}{RGB}{39,174,96}
+\definecolor{gris}{RGB}{127,140,141}
+\definecolor{clair}{RGB}{244,246,247}
+
+\setbeamercolor{frametitle}{bg=primary, fg=white}
+\setbeamercolor{title}{fg=white}
+\setbeamercolor{structure}{fg=accent}
+\setbeamercolor{alerted text}{fg=accent2}
+\setbeamerfont{frametitle}{size=\large, series=\bfseries}
+\setbeamerfont{framesubtitle}{size=\small}
+\setbeamercolor{framesubtitle}{fg=gris}
+
+\setbeamertemplate{footline}{%
+  \hfill\usebeamerfont{footline}\color{gris}\scriptsize
+  \insertframenumber\,/\,\inserttotalframenumber\hspace*{2ex}\vspace*{1ex}}
+
+\newcommand{\pointfort}[1]{\textcolor{accent2}{\textbf{#1}}}
+
+% Bloc « à retenir » en bas de diapositive
+\newcommand{\aretenir}[1]{%
+  \vfill
+  \begin{beamercolorbox}[wd=\textwidth, sep=2ex, rounded=true]{}%
+    \color{primary}\small #1
+  \end{beamercolorbox}}
+
+\title{\Huge Ricochet}
+\subtitle{Système de recommandation d'articles — MVP}
+\date{}
+
+\begin{document}
+
+% ═══════════════════════════════════════════════════════════ Ouverture ══════
+{\setbeamercolor{background canvas}{bg=primary}
+\begin{frame}[plain]
+  \vfill
+  {\color{white}\Huge\bfseries Ricochet}\\[0.6em]
+  {\color{white!75!primary}\Large Système de recommandation d'articles — MVP}\\[1.5em]
+  \textcolor{accent2}{\rule{0.25\textwidth}{2pt}}
+  \vfill
+  {\color{white!70!primary}\small Approches testées \textperiodcentered\ Fonctionnalités
+   \textperiodcentered\ Architecture cible \textperiodcentered\ Démonstration}
+\end{frame}}
+
+\begin{frame}{Contexte}
+  \framesubtitle{Ce qui est demandé, avec quelles données}
+  \begin{itemize}
+    \item Proposer \pointfort{5 articles} à chaque lecteur, pour l'inciter à lire
+          davantage.
+    \item Pas de données propriétaires : jeu public Globo.com —
+          \textbf{2 988 181} clics, \textbf{322 897} lecteurs,
+          \textbf{364 047} articles.
+    \item[] \vspace{0.3em}
+    \item \pointfort{Contrainte majeure : le jeu est anonymisé.}
+      \begin{itemize}
+        \item aucun titre, aucun texte : un article n'est qu'un vecteur de
+              250 dimensions et un identifiant ;
+        \item aucune note, aucun avis : seulement des clics, donc un signal
+              implicite ;
+        \item conséquence — tout se fait sans lire le contenu, et l'interface ne
+              peut afficher que des identifiants.
+      \end{itemize}
+  \end{itemize}
+\end{frame}
+
+% ═══════════════════════ PARTIE 1 — Modélisation (10 min, 8 diapos) ════════
+\begin{frame}{Partie 1 — Les cinq approches testées}
+  \framesubtitle{10 minutes \textperiodcentered\ comment chacune classe les articles}
+  \centering
+  \small
+  \begin{tabular}{@{}lll@{}}
+    \toprule
+    \textbf{Approche} & \textbf{Principe} & \textbf{Bibliothèque} \\
+    \midrule
+    Popularité       & articles les plus lus sur une fenêtre     & --- \\
+    Contenu          & profil = moyenne des embeddings, cosinus  & scikit-learn (ACP) \\
+    Collaboratif ALS & factorisation lecteur $\times$ article    & implicit \\
+    Collaboratif SVD & prédiction de notes dérivées des clics    & Surprise \\
+    Mixte            & combinaison sur les 5 places              & --- \\
+    \bottomrule
+  \end{tabular}
+  \aretenir{La popularité sert de \pointfort{référence à battre} : elle ne
+    personnalise rien, donc toute approche plus complexe doit faire mieux qu'elle.}
+\end{frame}
+
+\begin{frame}{Approche 1 — Filtrage par le contenu}
+  \framesubtitle{Similarité des embeddings d'articles}
+  \centering
+  \begin{tikzpicture}[node distance=8mm, every node/.style={font=\scriptsize},
+      bloc/.style={draw=primary, thick, rounded corners, text width=2.6cm,
+                   align=center, minimum height=1cm, text=white}]
+    \node[bloc, fill=accent]  (a) {Articles lus\\par le lecteur};
+    \node[bloc, fill=accent2, right=of a] (b) {Profil = moyenne\\des vecteurs};
+    \node[bloc, fill=primary, right=of b] (c) {Cosinus vers\\le catalogue};
+    \draw[-{Latex[length=2mm]}, gris, thick] (a) -- (b);
+    \draw[-{Latex[length=2mm]}, gris, thick] (b) -- (c);
+  \end{tikzpicture}
+
+  \vspace{1em}
+  \scriptsize
+  \begin{columns}[t]
+    \begin{column}{0.48\textwidth}
+      \textcolor{vert}{\textbf{Avantages}}
+      \begin{itemize}\itemsep2pt
+        \item fonctionne dès le 1\textsuperscript{er} clic, sans ré-entraînement ;
+        \item gère un article nouveau immédiatement (il a un vecteur) ;
+        \item couverture du catalogue la plus large : \textbf{0,27 \%} contre 0,003 \% ;
+        \item personnalisation \textbf{96 \%}.
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \textcolor{red!70!black}{\textbf{Inconvénients}}
+      \begin{itemize}\itemsep2pt
+        \item précision faible : HitRate@5 = \textbf{0,0200} ;
+        \item n'exploite pas l'intelligence collective ;
+        \item sans restriction aux articles récents, propose des articles vieux de
+              plusieurs années que personne ne lit.
+      \end{itemize}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Approche 2 — Collaboratif ALS (\texttt{implicit})}
+  \framesubtitle{Factorisation pour feedback implicite}
+  \small
+  \begin{itemize}
+    \item Traite toutes les cases vides comme des \textbf{négatifs pondérés} :
+          formulation adaptée à des clics, pas à des notes.
+    \item Réglages mesurés sur validation — les deux pointent dans le même sens :
+      \begin{itemize}
+        \item fenêtre d'entraînement \textbf{72 h} (0,0200) plutôt que tout
+              l'historique (0,0120) ;
+        \item \textbf{16 facteurs} latents (0,0345) plutôt que 100 (0,0125).
+      \end{itemize}
+    \item \pointfort{Moins de données, plus récentes, et un modèle plus petit}
+          valent mieux qu'un gros modèle appris sur dix jours d'actualité.
+    \item Résultat sur test : HitRate@5 = \textbf{0,0415}, personnalisation 95 \%.
+  \end{itemize}
+  \aretenir{Limite structurelle : un article publié il y a deux heures n'a presque
+    aucune co-lecture — le collaboratif ne peut pas le proposer.}
+\end{frame}
+
+\begin{frame}{Approche 3 — Collaboratif SVD (\texttt{Surprise})}
+  \framesubtitle{Trois définitions de note, trois résultats}
+  \centering
+  \scriptsize
+  \begin{tabular}{@{}lccl@{}}
+    \toprule
+    \textbf{Définition de la note} & \textbf{HitRate@5} & \textbf{Person.} &
+    \textbf{Verdict} \\
+    \midrule
+    Étoiles de l'article (log des clics) & 0,0000 & 12 \% &
+      reproduit la popularité \\
+    Binaire + 1 négatif échantillonné   & 0,0080 & 46 \% & insuffisant \\
+    Binaire + 4 négatifs échantillonnés & 0,0755\,$^*$ & 34 \% &
+      meilleure variante \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.8em}
+  \raggedright\scriptsize
+  \begin{itemize}\itemsep3pt
+    \item Même bibliothèque, même algorithme : c'est la \pointfort{formulation du
+          problème} qui change tout, pas l'outil.
+    \item Les étoiles échouent parce que la note ne dépend que de l'article : le
+          biais article capte tout le signal, et le modèle apprend « quels articles
+          sont lus », pas « qui lit quoi ».
+    \item $^*$ mesuré sur validation ; ce réglage \textbf{ne s'est pas reproduit}
+          sur le test (0,0160) — d'où l'utilité d'une période de test intacte.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Comment nous avons su que les premiers chiffres étaient faux}
+  \framesubtitle{Découpage temporel 60 / 20 / 20}
+  \small
+  \begin{itemize}
+    \item Première évaluation : modèles entraînés sur 100 \% des données, puis
+          évalués sur ces mêmes données. L'ALS affichait HitRate@5 = 0,2300.
+    \item Avec un découpage temporel correct, il tombe à \textbf{0,0250} —
+          \pointfort{un facteur 42}, invisible sans découpage.
+    \item Temporel et non aléatoire : sur un flux d'actualité, un découpage
+          aléatoire laisse le modèle apprendre des clics \emph{postérieurs} à ceux
+          qu'il doit prédire.
+    \item Le réglage se fait sur la validation ; le test ne sert qu'à la mesure
+          finale, une seule fois.
+  \end{itemize}
+
+  \vspace{0.5em}
+  \centering
+  \begin{tikzpicture}[every node/.style={font=\scriptsize, text=white,
+        minimum height=0.9cm, align=center}]
+    \node[fill=accent,  minimum width=6cm]   (a) {60 \% entraînement};
+    \node[fill=accent2, minimum width=2.6cm, right=0pt of a] (b) {20 \% validation};
+    \node[fill=primary, minimum width=2.6cm, right=0pt of b] (c) {20 \% test};
+  \end{tikzpicture}
+
+  {\scriptsize\color{gris} le temps s'écoule de gauche à droite — aucune fuite du
+   futur vers le passé}
+\end{frame}
+
+\begin{frame}{Résultat principal : la fraîcheur pèse plus que le modèle}
+  \framesubtitle{Même algorithme, deux fenêtres de comptage}
+  \centering
+  \small
+  \begin{tabular}{@{}lrr@{}}
+    \toprule
+    \textbf{Fenêtre de comptage des clics} & \textbf{Candidats} &
+    \textbf{HitRate@5} \\
+    \midrule
+    1 heure                      &    791 & \textbf{0,2190} \\
+    6 heures                     &  2 657 & 0,1480 \\
+    24 heures                    &  6 777 & 0,1060 \\
+    Tout l'historique (240 h)    & 29 118 & \textbf{0,0075} \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.8em}
+  \raggedright\small
+  \begin{itemize}\itemsep3pt
+    \item \pointfort{Facteur 250} entre la première et la dernière ligne, sans
+          changer une ligne d'algorithme.
+    \item Explication : \textbf{48 \%} des articles lus pendant la période évaluée
+          n'existaient pas encore pendant l'entraînement.
+    \item Conséquence produit : recalculer la fenêtre en continu compte davantage
+          que raffiner le modèle.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Quatre critères, pas un seul}
+  \framesubtitle{La précision seule désigne toujours la popularité}
+  \centering
+  \scriptsize
+  \begin{tabular}{@{}llrr@{}}
+    \toprule
+    \textbf{Critère} & \textbf{Ce qu'il mesure} & \textbf{Popularité} &
+    \textbf{Contenu} \\
+    \midrule
+    HitRate@5        & un article recommandé a été lu      & 0,2525 & 0,0200 \\
+    Couverture       & part du catalogue exposée           & 0,003 \% & 0,27 \% \\
+    Personnalisation & différence entre deux listes        & 4 \%   & 96 \% \\
+    Recall@5         & part du futur devinée (plafond 0,76)& 0,0555 & 0,0034 \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.8em}
+  \raggedright\small
+  \begin{itemize}\itemsep3pt
+    \item La popularité est 12 fois plus précise, mais expose \textbf{11 articles
+          sur 364 047} : un éditeur y perd son catalogue.
+    \item C'est le quatrième critère qui a \pointfort{disqualifié le SVD sur
+          étoiles} : personnalisation 12 \%, soit \emph{moins} que la popularité —
+          il la reproduisait en plus grossier.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Résultat final sur la période de test}
+  \framesubtitle{Chaque approche dans sa meilleure configuration}
+  \centering
+  \scriptsize
+  \begin{tabular}{@{}lrrr@{}}
+    \toprule
+    \textbf{Configuration} & \textbf{HitRate@5} & \textbf{Couverture} &
+    \textbf{Person.} \\
+    \midrule
+    Popularité 1 h                        & \textbf{0,2525} & 0,003 \% &  4 \% \\
+    \textbf{Mixte : 4 populaires + 1 contenu} & \textbf{0,2500} & 0,116 \% & 22 \% \\
+    ALS (72 h, 16 facteurs)               & 0,0415 & 0,015 \% & 95 \% \\
+    Contenu (vivier 6 h)                  & 0,0200 & \textbf{0,268 \%} & 96 \% \\
+    SVD Surprise (binaire + négatifs)     & 0,0160 & 0,010 \% & 53 \% \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.8em}
+  \raggedright\small
+  \begin{itemize}\itemsep3pt
+    \item Retenu : \pointfort{4 populaires (1 h) + 1 contenu}. La place accordée au
+          contenu ne coûte rien en précision (0,2500 contre 0,2525, écart non
+          significatif) et \textbf{multiplie la couverture par 38}.
+    \item Une place donnée à l'ALS coûterait 3,7 \% de précision pour un gain de
+          couverture neuf fois plus faible : il reste disponible, mais n'est pas
+          servi.
+  \end{itemize}
+\end{frame}
+
+% ═════════════════ PARTIE 2 — Fonctionnalités (6 min, 5 diapos) ═══════════
+\begin{frame}{Partie 2 — Les stratégies dans l'application}
+  \framesubtitle{6 minutes \textperiodcentered\ ce que l'utilisateur peut faire}
+  \small
+  \begin{itemize}
+    \item L'application expose les \textbf{cinq stratégies} : on bascule en direct
+          et les listes diffèrent visiblement.
+      \begin{itemize}
+        \item « Production » — 4 populaires (1 h) + 1 contenu : ce qui est servi ;
+        \item « Contenu », « ALS », « SVD Surprise », « Hybride » : pour comparaison.
+      \end{itemize}
+    \item Une case \pointfort{« Limiter aux articles récents »}, activée par
+          défaut : la décocher montre en direct l'effet mesuré en partie 1.
+    \item Le nombre d'articles est réglable de 1 à 10.
+    \item Chaque article affiche sa \textbf{note en étoiles} et son nombre de
+          lecteurs — les seules informations réelles disponibles sur un jeu
+          anonymisé.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Un lecteur dont on ne sait rien}
+  \framesubtitle{Le cas le plus fréquent sur un portail d'actualité}
+  \centering
+  \begin{tikzpicture}[node distance=7mm, every node/.style={font=\scriptsize},
+      bloc/.style={draw=primary, thick, rounded corners, text width=2.7cm,
+                   align=center, minimum height=1.1cm, text=white}]
+    \node[bloc, fill=gris]    (a) {Aucun historique};
+    \node[bloc, fill=accent,  right=of a] (b) {Articles récents\\les plus lus};
+    \node[bloc, fill=accent2, right=of b] (c) {Région connue :\\articles récents\\de sa région};
+    \draw[-{Latex[length=2mm]}, gris, thick] (a) -- (b);
+    \draw[-{Latex[length=2mm]}, gris, thick] (b) -- (c);
+  \end{tikzpicture}
+
+  \vspace{1em}
+  \raggedright\small
+  \begin{itemize}\itemsep4pt
+    \item \textbf{Cascade de repli} : région croisée avec la fraîcheur, puis
+          fraîcheur, puis région, puis historique complet. Aucune requête ne
+          renvoie de liste vide.
+    \item La région est la seule information exploitable sur un lecteur inconnu :
+          27 régions retenues, celles ayant assez de clics pour un classement.
+    \item Dès le premier article lu, le profil de contenu prend le relais —
+          \pointfort{sans aucun ré-entraînement}.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Inscrire un lecteur, voir son profil se former}
+  \framesubtitle{En direct, sans ré-entraînement}
+  \small
+  \begin{itemize}
+    \item L'application permet d'\textbf{inscrire un lecteur}, de lui donner un
+          profil de départ, puis de marquer des articles comme lus.
+    \item À chaque lecture enregistrée les recommandations changent : le profil est
+          la moyenne des vecteurs lus, recalculée à la demande.
+    \item Un onglet \textbf{catalogue} (364 047 articles, quatre tris, filtre par
+          note) permet de cliquer autre chose que les cinq suggestions —
+      \begin{itemize}
+        \item sans lui, le lecteur ne pourrait cliquer que ce que le modèle propose
+              déjà, et son profil ne ferait que se renforcer dans sa direction
+              initiale.
+      \end{itemize}
+    \item Côté service, l'historique est \pointfort{transmis dans la requête} : le
+          service recommande un lecteur qu'il ne connaît pas, sans conserver d'état.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Publier un nouvel article}
+  \framesubtitle{Disponible en minutes, sans ré-entraînement}
+  \centering
+  \begin{tikzpicture}[node distance=7mm, every node/.style={font=\scriptsize},
+      bloc/.style={draw=primary, thick, rounded corners, text width=2.7cm,
+                   align=center, minimum height=1cm, text=white}]
+    \node[bloc, fill=accent]  (a) {Embedding\\250 dimensions};
+    \node[bloc, fill=accent2, right=of a] (b) {Projection ACP\\sauvegardée};
+    \node[bloc, fill=primary, right=of b] (c) {Ajout au catalogue\\(50 dimensions)};
+    \draw[-{Latex[length=2mm]}, gris, thick] (a) -- (b);
+    \draw[-{Latex[length=2mm]}, gris, thick] (b) -- (c);
+  \end{tikzpicture}
+
+  \vspace{1em}
+  \raggedright\small
+  \begin{itemize}\itemsep4pt
+    \item La projection ACP est sérialisée avec le catalogue (\textbf{51 Ko}) :
+          sans elle, intégrer un article imposerait de réajuster l'ACP, donc de
+          recalculer les 364 047 vecteurs existants.
+    \item Vérifié : trois articles ajoutés reçoivent les identifiants
+          364047--364049 et \textbf{entrent immédiatement} dans le top-5 d'un
+          lecteur proche.
+    \item L'article n'a ni étoiles ni facteurs collaboratifs — il n'a aucun clic.
+          Il est recommandé par le contenu, seul signal disponible à cet instant.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Reproductibilité et garde-fous}
+  \framesubtitle{Ce qui empêche une régression de partir en production}
+  \centering
+  \scriptsize
+  \begin{tabular}{@{}ll@{}}
+    \toprule
+    \textbf{Élément} & \textbf{Rôle} \\
+    \midrule
+    Découpage temporel 60/20/20 & réglage sur validation, mesure sur test \\
+    MLflow (SQLite)             & paramètres, métriques et commit git de chaque essai \\
+    Registre de modèles         & versions des artefacts, retour arrière possible \\
+    \textbf{Porte de qualité}   & bloque la publication si HitRate@5 baisse de $>$10 \% \\
+    CI (GitHub Actions)         & 48 tests, cohérence des copies déployées \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.8em}
+  \raggedright\small
+  \begin{itemize}\itemsep3pt
+    \item La porte compare aux métriques de référence \textbf{versionnées dans le
+          dépôt} ; la référence ne change que délibérément.
+    \item Sans elle, un ré-entraînement dégradé se publierait sans alerte — c'est
+          exactement ce qui est arrivé avec un chargeur d'artefacts incomplet, qui
+          servait la popularité de tout l'historique \pointfort{sans lever
+          d'erreur}.
+  \end{itemize}
+\end{frame}
+
+% ═══════════════ PARTIE 3 — Architecture cible (2 min, 2 diapos) ══════════
+\begin{frame}{Partie 3 — Architecture technique}
+  \framesubtitle{2 minutes \textperiodcentered\ un cœur, trois déploiements indépendants}
+  \centering
+  \begin{tikzpicture}[every node/.style={font=\scriptsize, align=center, text=white},
+      bloc/.style={draw=primary, thick, rounded corners, text width=3.2cm,
+                   minimum height=1.3cm}]
+    \node[bloc, fill=primary, text width=6cm, minimum height=0.9cm] (art)
+      {Artefacts produits hors-ligne (ACP, ALS, SVD, fenêtres)};
+    \node[bloc, fill=accent,  below left=1cm and 1.2cm of art] (az)
+      {Azure Function\\+ Blob Storage\\\vspace{2pt}en ligne, 0,2 s};
+    \node[bloc, fill=accent2, below=1cm of art] (hf)
+      {Hugging Face Space\\+ HF Hub\\\vspace{2pt}démo publique};
+    \node[bloc, fill=vert, below right=1cm and 1.2cm of art] (loc)
+      {Application locale\\artefacts sur disque\\\vspace{2pt}aucun cloud};
+    \draw[-{Latex[length=2mm]}, gris, thick] (art) -- (az);
+    \draw[-{Latex[length=2mm]}, gris, thick] (art) -- (hf);
+    \draw[-{Latex[length=2mm]}, gris, thick] (art) -- (loc);
+  \end{tikzpicture}
+
+  \vspace{0.6em}
+  \raggedright\scriptsize
+  \begin{itemize}\itemsep3pt
+    \item Même cœur de recommandation dans les trois : les copies déployées sont
+          \textbf{générées}, et la CI vérifie qu'elles sont à jour.
+    \item À l'inférence, aucune bibliothèque d'apprentissage : \pointfort{numpy
+          seul}. scikit-learn, implicit et Surprise ne servent qu'hors-ligne.
+    \item Architecture 2 retenue pour le MVP : la Function lit les artefacts dans
+          Blob Storage, sans API intermédiaire.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Architecture cible}
+  \framesubtitle{Absorber les nouveaux articles et les nouveaux lecteurs}
+  \centering
+  \scriptsize
+  \begin{tabular}{@{}lllc@{}}
+    \toprule
+    \textbf{Événement} & \textbf{Traitement} & \textbf{Latence} &
+    \textbf{Ré-entr.} \\
+    \midrule
+    Nouvel article      & embedding + projection ACP        & minutes    & non \\
+    Nouveau clic        & profil recalculé à la demande     & temps réel & non \\
+    Nouveau lecteur     & popularité, puis contenu au 1	extsuperscript{er} clic
+                        & temps réel & non \\
+    Couverture collab.  & facteurs latents                  & heures     & oui \\
+    Dérive du catalogue & ré-ajustement de l'ACP            & planifié   & oui \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.8em}
+  \raggedright\small
+  \begin{itemize}\itemsep3pt
+    \item \pointfort{Seule la partie collaborative impose un ré-entraînement} ; les
+          deux besoins immédiats sont couverts sans.
+    \item Reste à construire : ingestion événementielle, store de profils, fenêtre
+          glissante recalculée en continu, index de similarité pour l'échelle.
+  \end{itemize}
+\end{frame}
+
+% ═════════════════════ PARTIE 4 — Démonstration (2 min, 1 diapo) ══════════
+\begin{frame}{Partie 4 — Démonstration}
+  \framesubtitle{2 minutes \textperiodcentered\ six gestes}
+  \begin{enumerate}
+    \item Sélectionner un lecteur : 5 articles, avec étoiles et nombre de lecteurs.
+    \item Décocher « articles récents » : la liste change — \pointfort{l'effet
+          mesuré, en direct}.
+    \item Basculer sur « SVD Surprise » : autre classement, autre bibliothèque.
+    \item Parcourir le catalogue : cliquer un article hors des suggestions.
+    \item Inscrire un lecteur : il reçoit des recommandations immédiatement.
+    \item Le même appel sur Azure : 0,2 s, réponse identique au local.
+  \end{enumerate}
+  \aretenir{Les articles n'ont ni titre ni texte : le jeu de données est anonymisé
+    par sa source. L'interface affiche identifiant, catégorie, longueur, date et
+    note — les seules informations réelles disponibles.}
+\end{frame}
+
+% ═══════════════════════════════════════════════════════════ Clôture ═══════
+{\setbeamercolor{background canvas}{bg=primary}
+\begin{frame}[plain]
+  \vfill
+  {\color{white}\LARGE\bfseries La fraîcheur pèse plus que le modèle}\\[1em]
+  {\color{white!75!primary}\small
+   Facteur 250 sur la précision, mesuré sur découpage temporel.\\[0.4em]
+   Une place sur cinq accordée à la personnalisation ne coûte rien
+   et multiplie par 38 la part du catalogue exposée.}
+  \vfill
+\end{frame}}
+
+\end{document}

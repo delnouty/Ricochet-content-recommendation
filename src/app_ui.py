@@ -33,7 +33,7 @@ from recommender import Recommender  # copie embarquée (scripts/sync_recommende
 from user_store import UserStore
 
 # Contexte fourni par l'hébergement (voir run()).
-_CTX: dict = {"models_dir": None, "clients_db": None}
+_CTX: dict = {"models_dir": None, "clients_db": None, "recommender": None}
 # Libellés explicites : « collab » et « svd » sont deux modèles collaboratifs
 # différents, entraînés par deux bibliothèques différentes.
 # `mix` en premier : c'est la stratégie retenue pour la production, sur mesures
@@ -80,8 +80,15 @@ def resolve_metadata_file() -> Path | None:
     return next((c for c in candidates if c.exists()), None)
 
 
+def get_recommender() -> tuple[object, str]:
+    """Moteur injecté par l'hébergement, sinon `Recommender` local (mis en cache)."""
+    if _CTX["recommender"] is not None:
+        return _CTX["recommender"], str(_CTX["models_dir"])
+    return _charger_local(str(_CTX["models_dir"] or ""))
+
+
 @st.cache_resource(show_spinner="Chargement du modèle…")
-def get_recommender() -> tuple[Recommender, str]:
+def _charger_local(_cle: str) -> tuple[Recommender, str]:
     models_dir = resolve_models_dir()
     return Recommender(models_dir), str(models_dir)
 
@@ -332,8 +339,21 @@ def view_recommendations(reco: Recommender, store: UserStore, meta: dict) -> Non
         st.error(str(exc))
         return
 
+    if not recs:
+        # Un moteur distant peut échouer sans lever d'exception (réseau, 401) :
+        # il expose alors `derniere_erreur`, qu'il faut montrer plutôt que de
+        # laisser une page vide.
+        erreur = getattr(reco, "derniere_erreur", None)
+        if erreur:
+            st.error(f"Le service n'a rien renvoyé — {erreur}")
+        else:
+            st.warning("Aucune recommandation disponible pour ce lecteur.")
+        return
+
+    latence = getattr(reco, "derniere_latence_ms", None)
+    detail = f" — {latence:.0f} ms" if latence else ""
     st.markdown(f"**{len(recs)} article(s) recommandé(s)** — "
-                f"{'popularité (cold start)' if not history else method}")
+                f"{'popularité (cold start)' if not history else method}{detail}")
 
     is_client = store.name_of(user_id) is not None
     for rank, article_id in enumerate(recs, start=1):
@@ -417,10 +437,18 @@ def view_browse(reco: Recommender, store: UserStore, meta: dict) -> None:
             st.rerun()
 
 
-def run(models_dir, clients_db, banniere: str | None = None) -> None:
-    """Point d'entrée unique, appelé par `local/app.py` et `spaces/app.py`."""
+def run(models_dir, clients_db, banniere: str | None = None,
+        recommender=None) -> None:
+    """Point d'entrée unique des trois solutions.
+
+    `recommender` permet d'injecter un moteur autre que le `Recommender` local : la
+    solution Azure fournit un adaptateur HTTP (`app/api_client.py`) exposant la même
+    surface. L'interface ne fait alors aucune différence entre un modèle embarqué et
+    un service distant.
+    """
     _CTX["models_dir"] = str(models_dir)
     _CTX["clients_db"] = str(clients_db)
+    _CTX["recommender"] = recommender
 
     st.set_page_config(page_title="Ricochet — recommandation d'articles", page_icon="🎯")
     st.title("🎯 Ricochet — recommandation d'articles")
