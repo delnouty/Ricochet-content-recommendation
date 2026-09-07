@@ -10,6 +10,11 @@ invocations à chaud.
 Développement local : définir MODELS_DIR (ex. le dossier `models/` du dépôt) pour
 court-circuiter Blob Storage.
 
+Les trois artefacts de **fraîcheur** (23 Ko) arrivent en plus par *blob input
+binding* à chaque invocation (voir `function_app.py`). Ils restent téléchargés ici
+pour servir de repli : si une lecture du binding échoue, le moteur garde la fenêtre
+du démarrage plutôt que de perdre la fraîcheur.
+
 **Le téléchargement énumère le conteneur** au lieu de suivre une liste figée. Une
 liste codée en dur a déjà causé un défaut silencieux : les artefacts de fraîcheur
 (`popular_recent.npy`), les étoiles et les facteurs SVD, ajoutés après elle,
@@ -34,6 +39,13 @@ REQUIRED = (
 # Extensions des artefacts de modèle. Filtre volontaire : le conteneur peut aussi
 # recevoir des fichiers étrangers au service (rapports, sauvegardes).
 EXTENSIONS = (".npy", ".pkl", ".json")
+
+# Artefacts de fraîcheur : livrés à chaque invocation par un **blob input binding**
+# (voir function_app.py), mais **aussi téléchargés ici**. Ce n'est pas un doublon
+# inutile : 23 Ko au démarrage donnent une valeur de repli si une lecture du binding
+# échoue. La copie ne masque rien, puisque le binding s'applique après
+# l'initialisation du moteur, à chaque appel.
+PAR_BINDING = ("popular_recent.npy", "candidates_recent.npy", "recent_window.json")
 
 
 def ensure_models() -> Path:

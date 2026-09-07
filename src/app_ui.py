@@ -33,7 +33,8 @@ from recommender import Recommender  # copie embarquée (scripts/sync_recommende
 from user_store import UserStore
 
 # Contexte fourni par l'hébergement (voir run()).
-_CTX: dict = {"models_dir": None, "clients_db": None, "recommender": None}
+_CTX: dict = {"models_dir": None, "clients_db": None, "recommender": None,
+              "store": None}
 # Libellés explicites : « collab » et « svd » sont deux modèles collaboratifs
 # différents, entraînés par deux bibliothèques différentes.
 # `mix` en premier : c'est la stratégie retenue pour la production, sur mesures
@@ -93,9 +94,16 @@ def _charger_local(_cle: str) -> tuple[Recommender, str]:
     return Recommender(models_dir), str(models_dir)
 
 
+def get_store():
+    """Magasin de clients : injecté par l'hébergement, sinon SQLite local."""
+    if _CTX["store"] is not None:
+        return _CTX["store"]
+    return _ouvrir_store_local(_CTX["clients_db"]
+                               or os.environ.get("CLIENTS_DB", "clients.db"))
+
+
 @st.cache_resource
-def get_store() -> UserStore:
-    chemin = _CTX["clients_db"] or os.environ.get("CLIENTS_DB", "clients.db")
+def _ouvrir_store_local(chemin: str) -> UserStore:
     return UserStore(chemin)
 
 
@@ -438,7 +446,7 @@ def view_browse(reco: Recommender, store: UserStore, meta: dict) -> None:
 
 
 def run(models_dir, clients_db, banniere: str | None = None,
-        recommender=None) -> None:
+        recommender=None, store=None) -> None:
     """Point d'entrée unique des trois solutions.
 
     `recommender` permet d'injecter un moteur autre que le `Recommender` local : la
@@ -449,6 +457,9 @@ def run(models_dir, clients_db, banniere: str | None = None,
     _CTX["models_dir"] = str(models_dir)
     _CTX["clients_db"] = str(clients_db)
     _CTX["recommender"] = recommender
+    # `store` permet de remplacer SQLite par Azure Table Storage : indispensable
+    # dès que l'hébergement est éphémère (Space) ou partagé entre appareils.
+    _CTX["store"] = store
 
     st.set_page_config(page_title="Ricochet — recommandation d'articles", page_icon="🎯")
     st.title("🎯 Ricochet — recommandation d'articles")
@@ -495,7 +506,12 @@ def run(models_dir, clients_db, banniere: str | None = None,
         st.caption("Notes ★ : "
                    + (f"{int((_stars > 0).sum()):,} articles notés".replace(",", " ")
                       if _stars is not None else "artefact absent"))
-        st.caption(f"Base clients : `{store.db_path}`")
+        origine = getattr(store, "db_path", None)
+        if origine is None:
+            st.caption(f"Clients : Azure Table Storage "
+                       f"(`{getattr(store, 'nom_clients', 'table')}`)")
+        else:
+            st.caption(f"Clients : SQLite `{origine}`")
 
     tab_reco, tab_browse, tab_new = st.tabs(
         ["Recommandations", "Parcourir les articles", "Nouveau client"])

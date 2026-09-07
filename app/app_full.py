@@ -19,6 +19,10 @@ Un client inscrit ici est inconnu du service : son historique de lecture part do
 dans la requête (paramètre `history` de l'API), ce qui permet au service, sans état,
 de le recommander comme n'importe quel lecteur.
 
+Les clients inscrits sont conservés dans **Azure Table Storage** lorsque
+`AZURE_STORAGE_CONNECTION_STRING` est définie — ils survivent alors aux redémarrages
+et sont visibles depuis n'importe quel appareil. Sinon, repli sur SQLite local.
+
 Lancement :
     $env:FUNCTION_URL = "https://<app>.azurewebsites.net/api/recommend"
     $env:FUNCTION_KEY = "<clé de fonction>"
@@ -64,7 +68,15 @@ if __name__ == "__main__":
                 "Lancez `python scripts/serve_local.py` s'il ne répond pas.")
 
     models_dir = resolve_models_dir()
-    ui.run(models_dir,
-           os.environ.get("CLIENTS_DB", RACINE / "app" / "clients.db"),
-           banniere=banniere,
-           recommender=ApiRecommender(models_dir, URL, CLE))
+    clients_db = os.environ.get("CLIENTS_DB", RACINE / "app" / "clients.db")
+
+    # Magasin de clients : Azure Table Storage si une chaîne de connexion est
+    # fournie, SQLite sinon. Le même compte de stockage héberge déjà les artefacts,
+    # donc aucune ressource supplémentaire n'est nécessaire.
+    sys.path.insert(0, str(RACINE))
+    from src.user_store_azure import open_store
+    store = open_store(clients_db)
+
+    ui.run(models_dir, clients_db, banniere=banniere,
+           recommender=ApiRecommender(models_dir, URL, CLE),
+           store=store)

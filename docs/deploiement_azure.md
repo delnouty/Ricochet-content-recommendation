@@ -333,12 +333,28 @@ que le service fonctionne, pas pour montrer le produit.
 
 | Ce qui change | À faire |
 |---|---|
-| Artefacts (ré-entraînement, nouvelle fenêtre) | refaire l'étape 6, puis `az functionapp restart --name func-ricochet-darya --resource-group rg-ricochet` |
+| **Fenêtre de fraîcheur** (`popular_recent.npy`, `candidates_recent.npy`, `recent_window.json`) | refaire l'étape 6 — **et c'est tout** : ces trois fichiers arrivent par *blob input binding*, relus à chaque appel |
+| Autres artefacts (ré-entraînement, nouveau catalogue) | refaire l'étape 6, puis `az functionapp restart --name func-ricochet-darya --resource-group rg-ricochet` |
 | Code de la Function | refaire l'étape 8 |
 | Code partagé (`src/`) | `python scripts/sync_recommender.py` **avant** l'étape 8, sinon les copies déployées restent périmées |
 
-Le redémarrage après un changement d'artefacts est obligatoire : les instances gardent
-les fichiers téléchargés en cache local et ne les revérifient pas.
+Le redémarrage reste obligatoire pour les **artefacts lourds** (254 Mo) : les instances
+les gardent en cache local et ne les revérifient pas. Il ne l'est plus pour la
+fraîcheur, qui change toutes les heures et ne pouvait pas dépendre d'un redémarrage
+horaire du service (voir `docs/architecture.md` § 3.a, « Deux accès à Blob Storage »).
+
+Vérifier que le mécanisme fonctionne, sans redémarrer :
+
+```powershell
+# remplacer la fenêtre, puis interroger tout de suite
+az storage blob upload --account-name stricochetdarya --container-name models `
+  --name popular_recent.npy --file models/popular_recent.npy --auth-mode key --overwrite
+curl "https://func-ricochet-darya.azurewebsites.net/api/recommend?user_id=0&n=5&code=$key"
+```
+
+Les quatre premiers articles (créneaux de popularité) doivent suivre le nouveau
+fichier ; le cinquième, issu du contenu, ne change que si `candidates_recent.npy`
+change aussi.
 
 ---
 

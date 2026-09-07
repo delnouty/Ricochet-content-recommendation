@@ -56,6 +56,49 @@ directement aux modèles dans Blob Storage.
                                                      └────────────────────────┘
 ```
 
+#### Deux accès à Blob Storage, chacun là où il est le meilleur
+
+Julien suggérait le *blob input binding* — la Function déclare le fichier dont
+elle a besoin, l'hôte le lit et le passe en paramètre, sans SDK ni code de
+téléchargement. Appliqué à **tous** les artefacts, ce serait un contresens : le
+binding relit le blob **à chaque invocation**, or le catalogue, les historiques,
+les étoiles et les facteurs pèsent 254 Mo. Le cache du démarrage à froid
+disparaîtrait et chaque appel paierait le téléchargement (~8 s mesurées, contre
+~200 ms aujourd'hui, soit 40×).
+
+Mais l'écarter partout coûterait autre chose. Les trois artefacts de
+**fraîcheur** changent toutes les heures, et un cache mémoire ne se rafraîchit
+que par `az functionapp restart` : le service servirait la fenêtre de son
+démarrage, indéfiniment. Sur ces fichiers-là, le binding est exactement le bon
+outil.
+
+D'où le **partage retenu** :
+
+| Artefacts | Taille | Cadence | Accès | Coût par appel |
+|---|---|---|---|---|
+| `popular_recent.npy`, `candidates_recent.npy`, `recent_window.json` | 23 Ko | horaire | **blob input binding** | ~2 ms |
+| catalogue ACP, historiques, étoiles, popularité segmentée, facteurs | 254 Mo | ré-entraînement | SDK + cache au démarrage à froid | 0 (cache) |
+
+Le binding s'applique **après** l'initialisation du moteur : `set_freshness()`
+(`src/recommender.py`) remplace la fenêtre à chaque invocation. Les trois
+fichiers restent aussi téléchargés par le SDK, non par redondance inutile mais
+comme **repli** : si une lecture du binding échoue, `_rafraichir()` journalise
+un avertissement et le moteur conserve la fenêtre du démarrage — 23 Ko payés une
+fois pour que la dégradation reste gracieuse.
+
+**Vérification en production**, sans redémarrage :
+
+```
+appel initial                       → 211442, 50644, 36162, 156279, 159938
+remplacement de popular_recent.npy dans Blob (aucun restart)
+appel suivant                       → 209122, 224730, 205824, 70986, 159938
+```
+
+Les quatre créneaux de popularité suivent le nouveau fichier ; le cinquième
+(contenu, issu de `candidates_recent.npy` inchangé) ne bouge pas. C'est la
+preuve que la fraîcheur est bien relue à chaque appel — et que les artefacts
+lourds, eux, restent en cache.
+
 ### 3.b — Solution Hugging Face (démo publique, auto-suffisante)
 
 Un Space Streamlit **embarque** le Recommender et calcule les recos sur place ;
@@ -247,6 +290,7 @@ Pour éviter toute ambiguïté sur le périmètre du MVP :
 | Projection ACP persistée + fonction de projection | **implémenté** (`project_embeddings`, testé) |
 | **Intégration d'un nouvel article** (projection + ajout au catalogue) | **implémenté en lot** (`scripts/add_articles.py`, testé) |
 | Dégradation collaboratif → contenu → popularité | **implémenté** (`recommend()`) |
+| **Rafraîchissement de la fenêtre de fraîcheur sans redémarrage** | **implémenté** (blob input binding + `set_freshness()`, vérifié en production) |
 | Déclenchement *événementiel* de cette intégration (Event Hub → Function) | conçu, non implémenté |
 | Store de profils, écriture des clics | conçu, non implémenté |
 | Fold-in ALS, ré-entraînements planifiés | conçu, non implémenté |

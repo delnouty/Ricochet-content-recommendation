@@ -17,7 +17,23 @@ Endpoint HTTP : GET/POST /api/recommend
 Réponse JSON :
     {"user_id": 123, "method": "hybrid", "recommendations": [id1, ..., id5]}
 
-Le Recommender est instancié une seule fois (démarrage à froid) puis réutilisé.
+Deux accès à Blob Storage, chacun là où il est le meilleur
+----------------------------------------------------------
+
+**Blob storage input binding** pour les trois artefacts de *fraîcheur*
+(`popular_recent.npy`, `candidates_recent.npy`, `recent_window.json` — 23 Ko au
+total). Ils sont recalculés toutes les heures, et le binding les relit à chaque
+invocation : le service prend donc en compte une nouvelle fenêtre **sans
+redémarrage**. Coût mesuré : ~2 ms par appel.
+
+**SDK avec cache au démarrage à froid** pour les artefacts lourds (catalogue
+d'embeddings et historiques, 109 Mo). Un binding les retéléchargerait à chaque
+invocation : 8 s par appel au lieu de 0,2 s, soit un facteur 40, et 26 Go de
+trafic pour 100 appels. Le cache est donc le bon choix ici — ils ne changent
+qu'au ré-entraînement.
+
+Le Recommender est instancié une seule fois (démarrage à froid) puis réutilisé ;
+seule sa fraîcheur est rafraîchie à chaque appel.
 """
 
 import json
@@ -51,8 +67,40 @@ def _param(req: func.HttpRequest, name: str, body: dict):
     return value
 
 
+def _rafraichir(reco: Recommender, popular_recent, candidates_recent,
+                recent_window) -> None:
+    """Applique les artefacts de fraîcheur reçus par binding.
+
+    Une lecture qui échoue ne doit pas faire échouer la requête : le moteur
+    conserve alors la fenêtre chargée au démarrage, ce qui dégrade la pertinence
+    sans interrompre le service.
+    """
+    import io
+    import json as _json
+
+    import numpy as np
+
+    try:
+        reco.set_freshness(
+            popular_recent=np.load(io.BytesIO(popular_recent.read())),
+            candidates_recent=np.load(io.BytesIO(candidates_recent.read())),
+            window=_json.loads(recent_window.read().decode("utf-8")),
+        )
+    except Exception:  # noqa: BLE001
+        logging.warning("Artefacts de fraîcheur illisibles : fenêtre du démarrage "
+                        "conservée.", exc_info=True)
+
+
 @app.route(route="recommend", methods=[func.HttpMethod.GET, func.HttpMethod.POST])
-def recommend(req: func.HttpRequest) -> func.HttpResponse:
+@app.blob_input(arg_name="popular_recent", path="models/popular_recent.npy",
+                connection="AZURE_STORAGE_CONNECTION_STRING")
+@app.blob_input(arg_name="candidates_recent", path="models/candidates_recent.npy",
+                connection="AZURE_STORAGE_CONNECTION_STRING")
+@app.blob_input(arg_name="recent_window", path="models/recent_window.json",
+                connection="AZURE_STORAGE_CONNECTION_STRING")
+def recommend(req: func.HttpRequest, popular_recent: func.InputStream,
+              candidates_recent: func.InputStream,
+              recent_window: func.InputStream) -> func.HttpResponse:
     try:
         body = req.get_json() if req.get_body() else {}
     except ValueError:
@@ -110,8 +158,10 @@ def recommend(req: func.HttpRequest) -> func.HttpResponse:
             )
 
     try:
-        recs = _get_recommender().recommend(user_id, n=n, method=method, region=region,
-                                            fresh_only=fresh_only, history=history)
+        reco = _get_recommender()
+        _rafraichir(reco, popular_recent, candidates_recent, recent_window)
+        recs = reco.recommend(user_id, n=n, method=method, region=region,
+                              fresh_only=fresh_only, history=history)
     except ValueError as exc:  # method inconnue
         return func.HttpResponse(
             json.dumps({"error": str(exc)}),

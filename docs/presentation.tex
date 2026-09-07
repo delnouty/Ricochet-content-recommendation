@@ -469,6 +469,10 @@
           seul}. scikit-learn, implicit et Surprise ne servent qu'hors-ligne.
     \item Architecture 2 retenue pour le MVP : la Function lit les artefacts dans
           Blob Storage, sans API intermédiaire.
+    \item Deux accès à Blob : \pointfort{binding} sur les 23~Ko de fraîcheur —
+          relus à chaque appel, donc mise à jour horaire 	extbf{sans
+          redémarrage} — et SDK avec cache sur les 254~Mo d'artefacts lourds,
+          où le binding coûterait 40$	imes$ plus par requête.
   \end{itemize}
 \end{frame}
 
@@ -483,7 +487,7 @@
     \midrule
     Nouvel article      & embedding + projection ACP        & minutes    & non \\
     Nouveau clic        & profil recalculé à la demande     & temps réel & non \\
-    Nouveau lecteur     & popularité, puis contenu au 1	extsuperscript{er} clic
+    Nouveau lecteur     & popularité, puis contenu au 1\textsuperscript{er} clic
                         & temps réel & non \\
     Couverture collab.  & facteurs latents                  & heures     & oui \\
     Dérive du catalogue & ré-ajustement de l'ACP            & planifié   & oui \\

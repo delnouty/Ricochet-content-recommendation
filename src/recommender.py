@@ -132,6 +132,31 @@ class Recommender:
             # colonne des facteurs articles -> article_id
             self.cf_item_ids = np.load(self.models_dir / "cf_item_ids.npy")
 
+    # ---------------------------------------------------------------- fraîcheur
+    def set_freshness(self, popular_recent: np.ndarray | None = None,
+                      candidates_recent: np.ndarray | None = None,
+                      window: dict | None = None) -> None:
+        """Remplace les artefacts de fraîcheur par ceux fournis par l'appelant.
+
+        Les trois artefacts de fraîcheur (23 Ko au total) sont recalculés toutes les
+        heures, alors que le catalogue et les historiques (109 Mo) changent rarement.
+        Les charger une fois au démarrage, comme le reste, revient à servir une
+        fenêtre périmée jusqu'au prochain redémarrage du service.
+
+        Cette méthode permet à l'hôte de les rafraîchir sans réinstancier le moteur
+        — c'est ce dont se sert l'Azure Function, qui les reçoit à chaque invocation
+        par un *Blob storage input binding*.
+        """
+        if popular_recent is not None:
+            self.popular_recent = np.asarray(popular_recent, dtype=np.int64)
+            # Sans vivier dédié, le classement sert aussi de vivier.
+            if candidates_recent is None and self.candidates_recent.size == 0:
+                self.candidates_recent = self.popular_recent
+        if candidates_recent is not None:
+            self.candidates_recent = np.asarray(candidates_recent, dtype=np.int64)
+        if window is not None:
+            self.recent_window = window
+
     # ------------------------------------------------------------------ utils
     def _seen(self, user_id: int) -> np.ndarray:
         """Articles déjà cliqués par l'utilisateur (vide si inconnu).
