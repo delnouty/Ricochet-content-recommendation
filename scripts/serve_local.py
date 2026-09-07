@@ -7,7 +7,7 @@ avec le seul environnement virtuel du dépôt.
 
 Le contrat est identique à `azure_function/function_app.py` :
 
-    GET/POST /api/recommend?user_id=<int>&n=<int>&method=<content|collab|hybrid>
+    GET/POST /api/recommend?user_id=<int>&n=<int>&method=<mix|content|collab|svd|hybrid>
                            [&region=<int>]
     -> {"user_id": 0, "method": "hybrid", "recommendations": [id1, ..., id5]}
 
@@ -105,7 +105,7 @@ class _Handler(BaseHTTPRequestHandler):
         except (TypeError, ValueError):
             return self._json(400, {"error": "'user_id' et 'n' doivent être des entiers"})
 
-        method = str(params.get("method") or "hybrid").lower()
+        method = str(params.get("method") or "mix").lower()
 
         raw_region = params.get("region")
         try:

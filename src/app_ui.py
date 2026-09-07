@@ -36,11 +36,14 @@ from user_store import UserStore
 _CTX: dict = {"models_dir": None, "clients_db": None}
 # Libellés explicites : « collab » et « svd » sont deux modèles collaboratifs
 # différents, entraînés par deux bibliothèques différentes.
+# `mix` en premier : c'est la stratégie retenue pour la production, sur mesures
+# (voir notebooks 03 à 07). Les autres restent accessibles pour comparaison.
 STRATEGIES = {
-    "hybrid": "Hybride — contenu + ALS (défaut)",
+    "mix": "Production — 4 populaires (1 h) + 1 contenu",
     "content": "Contenu — similarité des embeddings",
     "collab": "Collaboratif ALS — bibliothèque implicit",
     "svd": "Collaboratif SVD — bibliothèque Surprise",
+    "hybrid": "Hybride — contenu + ALS (normalisé)",
 }
 
 

@@ -69,21 +69,36 @@ def test_unknown_region_falls_back_to_global(models_dir):
     assert reco.recommend(999, n=3, region=12345) == [5, 4, 3]
 
 
-def test_too_few_regional_articles_falls_back_to_global(models_dir):
-    """Un classement régional plus court que `n` ne doit pas tronquer la réponse."""
+def test_regional_ranking_court_complete_par_le_global(models_dir):
+    """Un classement régional plus court que `n` est utilisé **puis** complété.
+
+    Comportement modifié volontairement : la règle précédente jetait l'information
+    régionale dès qu'elle ne suffisait pas à remplir le top-n. Servir les articles
+    régionaux disponibles puis compléter par la popularité globale conserve les deux
+    signaux, et la cascade garantit d'atteindre n articles.
+    """
     _write_regions(models_dir, {7: [4, 2]})   # 2 articles pour n=3
     reco = Recommender(models_dir)
 
-    assert reco.recommend(999, n=3, region=7) == [5, 4, 3]
+    recs = reco.recommend(999, n=3, region=7)
+    assert recs[:2] == [4, 2], f"les articles régionaux doivent venir d'abord : {recs}"
+    assert len(recs) == 3, "la réponse doit être complétée jusqu'à n"
+    assert recs[2] not in (4, 2)
 
 
-def test_region_ignored_when_history_exists(models_dir):
-    """Le contenu prime : la région n'intervient que dans le repli."""
+def test_region_sans_effet_sur_une_strategie_personnalisee(models_dir):
+    """La région n'intervient pas dans une stratégie qui a un historique à exploiter.
+
+    Précision utile : la stratégie de production `mix` réserve quatre places sur cinq
+    à la popularité, donc **elle** utilise la région. Le test porte donc sur
+    `content`, qui ne s'appuie que sur le profil du lecteur.
+    """
     _write_regions(models_dir, {7: [4, 2, 1]})
     reco = Recommender(models_dir)
 
     # L'utilisateur 100 a lu l'article 0 (fixture) : content-based, pas de repli.
-    assert reco.recommend(100, n=3, region=7) == reco.recommend(100, n=3)
+    assert (reco.recommend(100, n=3, region=7, method="content")
+            == reco.recommend(100, n=3, method="content"))
 
 
 def test_regional_ranking_excludes_seen_articles(models_dir):

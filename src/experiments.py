@@ -11,6 +11,11 @@ Règle de méthode : le réglage se fait **uniquement sur la période de validat
 La période de test reste intacte jusqu'à la mesure finale, effectuée une seule fois
 avec la meilleure configuration de chaque méthode.
 
+Les stratégies reproduisent le comportement du `Recommender` de production, y compris
+l'**exclusion des articles déjà lus** : sans elle, une partie des cinq places est
+gaspillée sur des articles que le lecteur a déjà ouverts, et les mesures sous-estiment
+ce que le produit sert réellement.
+
 Les artefacts attendus dans `models_split/` sont ceux construits sur la seule
 période d'entraînement (`python -m src.evaluate --out-dir models_split`).
 """
@@ -108,10 +113,37 @@ def compare(configurations: dict, users: list[int], cible: pd.Series, n: int = 5
 
 
 # ------------------------------------------------------------------ stratégies
-def make_popularity(pool: np.ndarray):
-    """Les articles les plus lus de la fenêtre, identiques pour tout le monde."""
+def _vus(reco, user_id: int) -> set[int]:
+    """Articles déjà lus par le lecteur, bornés au catalogue."""
+    historique = reco.user_clicks.get(int(user_id))
+    if historique is None:
+        return set()
+    return {int(a) for a in historique if 0 <= int(a) < reco.n_articles}
+
+
+def _classer(indices: np.ndarray, scores: np.ndarray, vus: set[int],
+             n: int) -> list[int]:
+    """Top-n par score, articles déjà lus exclus — comme le `Recommender`."""
+    scores = scores.astype(np.float32, copy=True)
+    if vus:
+        scores[np.isin(indices, np.fromiter(vus, dtype=np.int64, count=len(vus)))] = -np.inf
+    k = min(n, scores.size)
+    idx = np.argpartition(-scores, k - 1)[:k]
+    idx = idx[np.argsort(-scores[idx])]
+    return [int(a) for a in indices[idx[np.isfinite(scores[idx])]]]
+
+
+def make_popularity(pool: np.ndarray, reco=None):
+    """Les articles les plus lus de la fenêtre, identiques pour tout le monde.
+
+    `reco` permet d'exclure les articles déjà lus, comme le fait le service. Sans
+    lui, la stratégie se comporte comme avant (utile pour mesurer l'écart).
+    """
     def strategie(user_id: int, n: int) -> list[int]:
-        return [int(a) for a in pool[:n]]
+        if reco is None:
+            return [int(a) for a in pool[:n]]
+        vus = _vus(reco, user_id)
+        return [int(a) for a in pool if int(a) not in vus][:n]
     return strategie
 
 
@@ -123,17 +155,21 @@ def make_content(reco, pool: np.ndarray, last_k: int | None = None):
     d'hier. `None` utilise tout l'historique (comportement de `Recommender`).
     """
     def strategie(user_id: int, n: int) -> list[int]:
-        vus = reco.user_clicks.get(int(user_id))
-        if vus is None or len(vus) == 0:
+        historique = reco.user_clicks.get(int(user_id))
+        if historique is None or len(historique) == 0:
+            return []
+        historique = np.asarray(historique, dtype=np.int64)
+        historique = historique[(historique >= 0) & (historique < reco.n_articles)]
+        if historique.size == 0:
             return []
         if last_k is not None:
-            vus = vus[-last_k:]
-        profil = reco.embeddings[vus].mean(axis=0)
+            historique = historique[-last_k:]
+        profil = reco.embeddings[historique].mean(axis=0)
         norme = np.linalg.norm(profil)
         if norme == 0:
             return []
         scores = reco.embeddings[pool] @ (profil / norme)
-        return [int(a) for a in pool[np.argsort(-scores)[:n]]]
+        return _classer(pool, scores, _vus(reco, user_id), n)
     return strategie
 
 
@@ -144,10 +180,10 @@ def make_als(reco, pool: np.ndarray):
 
     def strategie(user_id: int, n: int) -> list[int]:
         row = reco.cf_user_index.get(int(user_id))
-        if row is None or ids.size < n:
+        if row is None or ids.size == 0:
             return []
         scores = (reco.cf_item_factors[garde] @ reco.cf_user_factors[row])
-        return [int(a) for a in ids[np.argsort(-scores)[:n]]]
+        return _classer(ids, scores, _vus(reco, user_id), n)
     return strategie
 
 
@@ -158,12 +194,12 @@ def make_svd(reco, pool: np.ndarray):
 
     def strategie(user_id: int, n: int) -> list[int]:
         row = reco.svd_user_index.get(int(user_id))
-        if row is None or ids.size < n:
+        if row is None or ids.size == 0:
             return []
         scores = (reco.svd_global_mean + reco.svd_user_bias[row]
                   + reco.svd_item_bias[garde]
                   + reco.svd_item_factors[garde] @ reco.svd_user_factors[row])
-        return [int(a) for a in ids[np.argsort(-scores)[:n]]]
+        return _classer(ids, scores, _vus(reco, user_id), n)
     return strategie
 
 
@@ -229,16 +265,17 @@ def train_als_window(clicks_train: pd.DataFrame, hours: float | None,
     print(f"[als] fenêtre {hours or 'complète'} h : {uniq_u.size:,} users x "
           f"{uniq_i.size:,} items, {len(clicks_train):,} clics")
 
-    def make(pool: np.ndarray):
+    def make(pool: np.ndarray, reco_ref=None):
+        """`reco_ref` fournit l'historique des lecteurs, pour exclure le déjà-lu."""
         garde = np.isin(uniq_i, pool)
         ids = uniq_i[garde]
 
         def strategie(user_id: int, n: int) -> list[int]:
             row = index_u.get(int(user_id))
-            if row is None or ids.size < n:
+            if row is None or ids.size == 0:
                 return []
             scores = facteurs_i[garde] @ facteurs_u[row]
-            return [int(a) for a in ids[np.argsort(-scores)[:n]]]
+            return _classer(ids, scores, _vus(reco_ref, user_id) if reco_ref else set(), n)
         return strategie
 
     return make

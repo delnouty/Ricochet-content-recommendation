@@ -117,9 +117,10 @@ def evaluate(models_dir: Path, clicks_history: pd.DataFrame, clicks_eval: pd.Dat
     users, cible = xp.eval_users(reco, clicks_eval, max_users=max_users)
     print(f"[eval] {len(users):,} lecteurs évalués (connus et actifs ensuite)")
 
-    popularite = xp.make_popularity(pool_pop)
+    popularite = xp.make_popularity(pool_pop, reco)
     contenu = xp.make_content(reco, pool, last_k=None)
-    als = xp.train_als_window(clicks_history, als_hours, factors=als_factors)(pool)
+    als = xp.train_als_window(clicks_history, als_hours,
+                          factors=als_factors)(pool, reco)
 
     strategies = {
         f"popularité {pop_hours} h": popularite,

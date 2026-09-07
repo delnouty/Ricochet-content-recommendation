@@ -76,7 +76,8 @@ def test_region_seule_si_pas_de_vivier(models_dir):
     _regions(models_dir, {7: [4, 2, 1]})
     reco = Recommender(models_dir)
 
-    assert reco.recommend(999, n=3, region=7) == [4, 2, 1]
+    recs = reco.recommend(999, n=3, region=7)
+    assert recs == [4, 2, 1], f"classement régional attendu, obtenu {recs}"
 
 
 # --------------------------------------------------------------------- défaut 3

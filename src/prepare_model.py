@@ -9,10 +9,11 @@ légers, chargés ensuite par `Recommender` (et par l'Azure Function) :
     pour intégrer un **nouvel article** sans réajuster l'ACP (project_embeddings) ;
   - user_clicks.pkl             : dict user_id -> np.ndarray des article_id lus ;
   - popular_articles.npy        : article_id triés par popularité (tout l'historique) ;
-  - popular_recent.npy          : popularité sur **fenêtre glissante** + vivier
-    d'articles frais — le levier le plus fort du projet (facteur 250 sur la
-    précision, voir build_recent_popularity) ;
-  - recent_window.json          : bornes de la fenêtre, pour dater le classement ;
+  - popular_recent.npy          : popularité sur **fenêtre courte** (1 h) — le levier
+    le plus fort du projet (facteur 250 sur la précision) ;
+  - candidates_recent.npy       : vivier de candidats sur fenêtre plus large (6 h),
+    utilisé par les stratégies personnalisées ;
+  - recent_window.json          : bornes des deux fenêtres, pour dater le classement ;
   - popular_by_region.pkl       : popularité **par région**, pour un cold start
     contextuel (un nouveau lecteur reçoit ce qui marche dans sa région) ;
   - cf_*.npy / cf_*.pkl         : facteurs ALS du filtrage collaboratif.
@@ -165,7 +166,8 @@ def build_user_artifacts(clicks: pd.DataFrame, out_dir: Path) -> None:
 
 
 def build_recent_popularity(clicks: pd.DataFrame, out_dir: Path,
-                            window_hours: float = 6,
+                            window_hours: float = 1,
+                            candidate_hours: float = 6,
                             min_articles: int = 200) -> np.ndarray:
     """Popularité sur une **fenêtre glissante**, et vivier d'articles frais.
 
@@ -215,15 +217,30 @@ def build_recent_popularity(clicks: pd.DataFrame, out_dir: Path,
 
     np.save(out_dir / "popular_recent.npy", ordre)
 
+    # Seconde fenêtre, plus large : le **vivier de candidats** des stratégies
+    # personnalisées. Les deux optima mesurés diffèrent — 1 h pour le classement
+    # par popularité (0,2190), 6 h pour le contenu (0,0405, contre 0,0255 sur 1 h) :
+    # une fenêtre étroite prive le contenu de candidats à départager.
+    heures_vivier = max(heures, candidate_hours)
+    vivier_clics = clicks[(horodatages >= ancre - heures_vivier * 3600 * 1000)
+                          & (horodatages <= ancre)]
+    vivier = (vivier_clics["click_article_id"].value_counts().index
+              .to_numpy().astype(np.int64))
+    np.save(out_dir / "candidates_recent.npy", vivier)
+
     meta = {"window_hours_demandee": window_hours,
             "window_hours_effective": heures,
+            "candidate_hours": heures_vivier,
             "ancre_ms": ancre, "debut_ms": int(ancre - heures * 3600 * 1000),
             "clics_fenetre": int(len(fenetre)),
             "articles_fenetre": int(ordre.size),
+            "articles_vivier": int(vivier.size),
             "clics_aberrants_ecartes": aberrants}
     (out_dir / "recent_window.json").write_text(
         json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
 
+    print(f"[popular_recent] vivier de candidats {heures_vivier:g} h : "
+          f"{vivier.size:,} articles")
     print(f"[popular_recent] fenêtre {heures:g} h "
           f"{'(élargie depuis ' + format(window_hours, 'g') + ' h)' if heures != window_hours else ''}"
           f" : {ordre.size:,} articles, {len(fenetre):,} clics")
@@ -367,9 +384,11 @@ def main() -> None:
     parser.add_argument("--out-dir", default="models", type=Path)
     parser.add_argument("--pca", default=50, type=int, help="dimensions après ACP")
     parser.add_argument("--factors", default=50, type=int, help="facteurs latents ALS")
-    parser.add_argument("--window-hours", default=6, type=float,
-                        help="fenêtre de fraîcheur en heures (popularité récente et "
-                             "vivier de candidats) ; 1 à 6 selon le trafic")
+    parser.add_argument("--window-hours", default=1, type=float,
+                        help="fenêtre du classement par popularité (optimum mesuré : 1 h)")
+    parser.add_argument("--candidate-hours", default=6, type=float,
+                        help="fenêtre du vivier de candidats des stratégies "
+                             "personnalisées (optimum mesuré : 6 h)")
     parser.add_argument("--min-region-clicks", default=30, type=int,
                         help="clics minimum pour retenir une région (cold start contextuel)")
     args = parser.parse_args()
@@ -380,7 +399,8 @@ def main() -> None:
     clicks = load_clicks(args.data_dir)
     print(f"[clicks] {len(clicks):,} interactions chargées")
     build_user_artifacts(clicks, args.out_dir)
-    build_recent_popularity(clicks, args.out_dir, args.window_hours)
+    build_recent_popularity(clicks, args.out_dir, args.window_hours,
+                            args.candidate_hours)
     build_article_stars(clicks, args.out_dir)
     build_segment_popularity(clicks, args.out_dir, args.min_region_clicks)
     build_collaborative(clicks, args.out_dir, args.factors)

@@ -4,7 +4,8 @@ Endpoint HTTP : GET/POST /api/recommend
   Paramètres (query string ou corps JSON) :
     - user_id (int, requis)
     - n       (int, défaut 5)
-    - method  (str, défaut "hybrid" ; "content" | "collab" | "hybrid")
+    - method  (str, défaut "mix" — stratégie servie en production ;
+              "mix" | "content" | "collab" | "svd" | "hybrid")
     - region  (int, optionnel) : code de région, utilisé uniquement pour le cold
               start (un lecteur inconnu reçoit la popularité de sa région)
 
@@ -68,7 +69,7 @@ def recommend(req: func.HttpRequest) -> func.HttpResponse:
             status_code=400, mimetype="application/json",
         )
 
-    method = (_param(req, "method", body) or "hybrid").lower()
+    method = (_param(req, "method", body) or "mix").lower()
 
     # Région (code anonymisé) : n'affecte que le cold start.
     raw_region = _param(req, "region", body)

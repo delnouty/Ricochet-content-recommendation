@@ -6,7 +6,12 @@ du filtrage collaboratif) est faite hors-ligne par `prepare_model.py` et
 sérialisée dans des artefacts. On peut donc importer `Recommender` directement
 dans l'Azure Function sans embarquer scikit-learn ni implicit.
 
-Quatre stratégies sont exposées :
+Cinq stratégies sont exposées. **`mix` est celle retenue en production** : quatre
+places à la popularité de la dernière heure, une au contenu. Composition établie par
+mesure (notebooks 03 à 07) : la place accordée au contenu ne coûte rien en précision
+et multiplie par 32 la part du catalogue exposée.
+
+  - mix       : 4 popularité récente + 1 contenu (défaut, servi en production).
   - content   : similarité de contenu (profil utilisateur = moyenne des
                 embeddings des articles lus, puis cosinus vers tout le catalogue).
   - collab    : filtrage collaboratif ALS (feedback implicite), facteurs
@@ -74,6 +79,14 @@ class Recommender:
         recent_file = self.models_dir / "popular_recent.npy"
         self.popular_recent = (np.load(recent_file) if recent_file.exists()
                                else np.array([], dtype=np.int64))
+
+        # Vivier de candidats : fenêtre plus large que le classement (6 h contre 1 h).
+        # Les deux optima diffèrent — une fenêtre étroite est la meilleure pour
+        # classer par popularité, mais laisse trop peu d'articles à départager au
+        # contenu. À défaut d'artefact dédié, on réutilise le classement.
+        cand_file = self.models_dir / "candidates_recent.npy"
+        self.candidates_recent = (np.load(cand_file) if cand_file.exists()
+                                  else self.popular_recent)
         self.recent_window: dict = {}
         window_file = self.models_dir / "recent_window.json"
         if window_file.exists():
@@ -134,11 +147,11 @@ class Recommender:
         Renvoie None si le vivier est absent ou trop petit pour remplir un top-n :
         mieux vaut un classement sur tout le catalogue qu'une liste tronquée.
         """
-        if not fresh_only or self.popular_recent.size <= n:
+        if not fresh_only or self.candidates_recent.size <= n:
             return None
         # Un article du vivier absent du catalogue (artefacts désynchronisés) ferait
         # échouer l'indexation : on le filtre.
-        pool = self.popular_recent[self.popular_recent < self.n_articles]
+        pool = self.candidates_recent[self.candidates_recent < self.n_articles]
         return pool if pool.size > n else None
 
     @staticmethod
@@ -289,8 +302,44 @@ class Recommender:
         scores[np.isin(indices, seen)] = -np.inf
         return [int(a) for a in indices[self._argtop(scores, n)]]
 
+    def _mix(self, user_id: int, n: int, pool: np.ndarray | None = None,
+             places_contenu: int = 1, region: int | None = None,
+             fresh_only: bool = True) -> list[int] | None:
+        """Stratégie retenue en production : popularité récente + une place au contenu.
+
+        Composition mesurée sur validation puis confirmée sur test :
+
+            5 places popularité        HitRate@5 0,2190 | couverture 0,004 %
+            4 popularité + 1 contenu   HitRate@5 0,2190 | couverture 0,130 %
+            3 popularité + 2 contenu   HitRate@5 0,2100 | couverture 0,194 %
+
+        La première place donnée au contenu **ne coûte rien** en précision et
+        multiplie la couverture du catalogue par 32 ; la deuxième coûte 4 %. Une
+        place donnée à l'ALS, elle, coûte 3,7 % pour un gain de couverture neuf fois
+        plus faible — d'où son absence ici (les facteurs ALS et SVD restent
+        disponibles via les stratégies `collab` et `svd`, mais ne sont pas servis).
+        """
+        places_popularite = max(0, n - places_contenu)
+
+        # Les places « popularité » passent par la cascade de repli, et non par un
+        # classement choisi ici : c'est elle qui croise région et fraîcheur, et qui
+        # garantit de ne jamais renvoyer une liste vide.
+        out = list(self._popularity_fallback(user_id, places_popularite, region,
+                                             fresh_only))
+
+        # Le contenu complète ; il peut ne rien renvoyer (lecteur sans historique),
+        # auquel cas la liste reste purement populaire — comportement voulu en
+        # cold start.
+        for article in (self._content_based(user_id, n, pool) or []):
+            if len(out) >= n:
+                break
+            if article not in out:
+                out.append(article)
+
+        return out or None
+
     # ----------------------------------------------------------------- public
-    def recommend(self, user_id: int, n: int = 5, method: str = "hybrid",
+    def recommend(self, user_id: int, n: int = 5, method: str = "mix",
                   region: int | None = None, fresh_only: bool = True) -> list[int]:
         """Renvoie `n` article_id recommandés pour `user_id`.
 
@@ -303,6 +352,7 @@ class Recommender:
         contenu étant un signal bien plus fort.
         """
         dispatch = {
+            "mix": self._mix,
             "content": self._content_based,
             "collab": self._collaborative,
             "svd": self._svd,
@@ -314,7 +364,13 @@ class Recommender:
         # Les quatre stratégies acceptent le vivier : sans cela, la stratégie par
         # défaut (hybrid) continuerait de choisir dans tout le catalogue.
         pool = self._candidates(fresh_only, n)
-        result = dispatch[method](user_id, n, pool) or []
+        if method == "mix":
+            # `mix` a besoin du contexte complet : ses places populaires empruntent
+            # la cascade de repli, qui dépend de la région et de la fraîcheur.
+            result = self._mix(user_id, n, pool, region=region,
+                               fresh_only=fresh_only) or []
+        else:
+            result = dispatch[method](user_id, n, pool) or []
 
         if len(result) >= n:
             return result[:n]
@@ -353,7 +409,7 @@ class Recommender:
         frais = set(int(a) for a in self.popular_recent) if fresh_only else set()
 
         classements: list[np.ndarray] = []
-        region_ranking = self._region_ranking(region, n, seen)
+        region_ranking = self._region_ranking(region, seen)
 
         if region_ranking is not None and frais:
             # Articles de la région **présents dans la fenêtre**, dans l'ordre de
@@ -382,20 +438,22 @@ class Recommender:
                     return out
         return out
 
-    def _region_ranking(self, region: int | None, n: int,
+    def _region_ranking(self, region: int | None,
                         seen: set[int]) -> np.ndarray | None:
-        """Classement régional s'il est exploitable, sinon None.
+        """Classement régional, ou None si la région est inconnue.
 
-        Un classement régional trop court après exclusion des articles déjà lus
-        donnerait moins de `n` résultats : on préfère alors le classement global.
+        Aucune condition de longueur : c'est la cascade de `_popularity_fallback`
+        qui garantit d'atteindre n articles. Exiger `len >= n` conduisait à jeter
+        l'information régionale dès que la région comptait peu d'articles — alors
+        que servir les deux articles régionaux disponibles puis compléter est
+        strictement meilleur que les ignorer.
         """
         if region is None:
             return None
         ranking = self.popular_by_region.get(int(region))
-        if ranking is None:
+        if ranking is None or ranking.size == 0:
             return None
-        available = sum(1 for a in ranking if a not in seen)
-        return ranking if available >= n else None
+        return ranking if any(int(a) not in seen for a in ranking) else None
 
 
 def _minmax(x: np.ndarray) -> np.ndarray:
