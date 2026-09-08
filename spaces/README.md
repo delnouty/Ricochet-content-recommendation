@@ -3,9 +3,8 @@ title: Ricochet - Recommandation d'articles
 emoji: 🎯
 colorFrom: blue
 colorTo: indigo
-sdk: streamlit
-sdk_version: 1.60.0
-app_file: app.py
+sdk: docker
+app_port: 7860
 pinned: false
 ---
 
@@ -28,7 +27,7 @@ ne peuvent donc pas diverger, et la CI le vérifie (`--check`).
 
 | Onglet | Contenu |
 |---|---|
-| Recommandations | 4 stratégies (contenu, ALS, **SVD Surprise**, hybride), filtre de fraîcheur, étoiles |
+| Recommandations | 5 stratégies — celle de production (4 populaires 1 h + 1 contenu), puis contenu, ALS, **SVD Surprise** et hybride pour comparaison ; filtre de fraîcheur, étoiles |
 | Parcourir les articles | catalogue complet, 4 tris, filtre par note |
 | Nouveau client | inscription, région, profil initial |
 
@@ -50,13 +49,29 @@ démonstration reste donc représentative.
 python -m src.prepare_model --data-dir data/news-portal-user --out-dir models
 python -m src.collaborative_surprise --data-dir data/news-portal-user --out-dir models
 
-# 2. publier les artefacts sur le HF Hub (~254 Mo)
-huggingface-cli login
-python spaces/upload_artifacts.py --repo <org>/ricochet-models --models-dir models
+# 2. publier les artefacts sur le HF Hub (~253 Mo, 22 fichiers)
+pip install huggingface_hub
+$env:HF_TOKEN = "hf_..."        # PowerShell ; export HF_TOKEN=... sous bash
+python spaces/upload_artifacts.py --repo <compte>/ricochet-models --models-dir models
 
-# 3. pousser le Space
-huggingface-cli upload <org>/ricochet spaces/ . --repo-type space
+# 3. créer le Space — SDK « docker », voir la note ci-dessous
+python -c "from huggingface_hub import HfApi; HfApi().create_repo('<compte>/ricochet', repo_type='space', space_sdk='docker', exist_ok=True)"
+
+# 4. pousser le Space (hf remplace huggingface-cli depuis la version 0.34)
+hf upload <compte>/ricochet spaces/ . --repo-type space --exclude "__pycache__/*"
 ```
+
+**Pourquoi Docker et non Streamlit.** Hugging Face a retiré `streamlit` de ses SDK
+intégrés : la création d'un Space n'accepte plus que `gradio`, `docker` ou
+`static`, et une tentative avec `space_sdk="streamlit"` est refusée par l'API
+(`Invalid option: expected one of "gradio"|"docker"|"static" at sdk`). Les
+applications Streamlit passent donc par le SDK Docker — voir le `Dockerfile` de ce
+dossier, qui suit les contraintes de la plateforme (utilisateur d'UID 1000, port
+7860).
+
+Puis, **avant le premier démarrage**, définir la variable `HF_MODEL_REPO` du Space
+(*Settings → Variables and secrets*) : sans elle, `model_loader.ensure_models()`
+lève une erreur explicite plutôt que de deviner un dépôt.
 
 ## Secrets et variables du Space
 
@@ -79,6 +94,7 @@ MODELS_DIR=models streamlit run spaces/app.py
 
 | Fichier | Rôle |
 |---|---|
+| `Dockerfile` | image du Space (SDK Docker : Streamlit n'est plus un SDK intégré) |
 | `app.py` | point d'entrée : télécharge les artefacts, appelle `ui.run()` |
 | `ui.py` | **généré** — interface commune (source : `src/app_ui.py`) |
 | `recommender.py` | **généré** — cœur de reco (source : `src/recommender.py`) |
