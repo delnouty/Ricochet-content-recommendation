@@ -60,9 +60,11 @@ def resolve_models_dir() -> Path:
 
 if __name__ == "__main__":
     distant = "azurewebsites.net" in URL
-    banniere = (f"Recommandations calculées par **l'Azure Function** "
-                f"(`{URL.split('/api/')[0]}`). Cette application n'embarque aucun "
-                "modèle : elle n'affiche que ce que le service renvoie."
+    banniere = (f"Le modèle est déployé dans **Azure** : ses artefacts sont dans "
+                f"Blob Storage et l'Azure Function "
+                f"(`{URL.split('/api/')[0]}`) les charge pour calculer le "
+                "classement. Cette application ne contient pas le modèle — elle "
+                "envoie la requête et affiche la réponse."
                 if distant else
                 f"Mode local : le service interrogé est `{URL}`. "
                 "Lancez `python scripts/serve_local.py` s'il ne répond pas.")

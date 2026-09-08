@@ -489,8 +489,13 @@ def run(models_dir, clients_db, banniere: str | None = None,
         service = getattr(reco, "url", None)
         if service:
             hote = service.split("/api/")[0]
-            st.caption(f"Classement calculé par un **service distant** : `{hote}`. "
-                       "Aucun modèle n'est embarqué ici.")
+            # Formulation choisie pour lever une ambiguïté réelle : dire « aucun
+            # modèle ici » se lit facilement comme « aucun modèle nulle part ».
+            # Le modèle existe bel et bien — il est chargé par le service, pas
+            # par cette application.
+            st.caption(f"Le modèle est chargé et exécuté par le **service** "
+                       f"`{hote}`. Cette application ne le contient pas : elle "
+                       "lui envoie la requête et affiche la réponse.")
             latence = getattr(reco, "derniere_latence_ms", None)
             if latence is not None:
                 st.caption(f"Dernier appel : {latence:.0f} ms")
