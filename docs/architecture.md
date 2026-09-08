@@ -62,7 +62,7 @@ Julien suggérait le *blob input binding* — la Function déclare le fichier do
 elle a besoin, l'hôte le lit et le passe en paramètre, sans SDK ni code de
 téléchargement. Appliqué à **tous** les artefacts, ce serait un contresens : le
 binding relit le blob **à chaque invocation**, or le catalogue, les historiques,
-les étoiles et les facteurs pèsent 254 Mo. Le cache du démarrage à froid
+les étoiles et les facteurs pèsent 253 Mo. Le cache du démarrage à froid
 disparaîtrait et chaque appel paierait le téléchargement (~8 s mesurées, contre
 ~200 ms aujourd'hui, soit 40×).
 
@@ -77,7 +77,7 @@ D'où le **partage retenu** :
 | Artefacts | Taille | Cadence | Accès | Coût par appel |
 |---|---|---|---|---|
 | `popular_recent.npy`, `candidates_recent.npy`, `recent_window.json` | 23 Ko | horaire | **blob input binding** | ~2 ms |
-| catalogue ACP, historiques, étoiles, popularité segmentée, facteurs | 254 Mo | ré-entraînement | SDK + cache au démarrage à froid | 0 (cache) |
+| catalogue ACP, historiques, étoiles, popularité segmentée, facteurs | 253 Mo | ré-entraînement | SDK + cache au démarrage à froid | 0 (cache) |
 
 Le binding s'applique **après** l'initialisation du moteur : `set_freshness()`
 (`src/recommender.py`) remplace la fenêtre à chaque invocation. Les trois

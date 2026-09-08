@@ -21,6 +21,13 @@ liste codée en dur a déjà causé un défaut silencieux : les artefacts de fra
 n'étaient pas récupérés. Le service répondait quand même — avec la popularité de
 tout l'historique au lieu de celle de la dernière heure, soit un HitRate@5 de
 0,0010 au lieu de 0,2525. Aucune erreur, juste de mauvaises recommandations.
+
+**La fraîcheur du cache se juge sur la date, pas sur la taille** (voir `_a_jour`).
+Deuxième défaut silencieux de la même famille : un SVD reconstruit avec une autre
+définition de note produit des artefacts de taille identique, et les instances au
+cache survivant ne les retéléchargeaient pas. Le service a servi deux modèles
+différents selon l'instance touchée — mesuré : 6 réponses sur 10 avec le nouveau
+modèle, 4 avec l'ancien.
 """
 
 from __future__ import annotations
@@ -46,6 +53,29 @@ EXTENSIONS = (".npy", ".pkl", ".json")
 # échoue. La copie ne masque rien, puisque le binding s'applique après
 # l'initialisation du moteur, à chaque appel.
 PAR_BINDING = ("popular_recent.npy", "candidates_recent.npy", "recent_window.json")
+
+
+def _a_jour(dest: Path, blob) -> bool:
+    """Le fichier en cache correspond-il au blob **actuel** ?
+
+    La taille seule ne suffit pas, et c'est un défaut qui s'est produit : le SVD
+    a été reconstruit avec une autre définition de note, donc un modèle
+    entièrement différent — mais le même nombre de lecteurs et de facteurs, donc
+    des artefacts d'**exactement** la même taille. Les instances dont le cache
+    local avait survécu ne les ont jamais retéléchargés, et le service a répondu
+    avec deux modèles différents selon l'instance touchée, sans lever d'erreur.
+
+    On compare donc aussi la date : un blob plus récent que la copie locale est
+    retéléchargé. Le cas « fichier local plus récent » n'arrive pas, puisque
+    l'horodatage local est aligné sur celui du blob après chaque téléchargement.
+    """
+    if not dest.exists() or dest.stat().st_size != blob.size:
+        return False
+    if blob.last_modified is None:
+        return True  # le service ne datant pas le blob, la taille est tout ce qu'on a
+    # Une seconde de tolérance : les systèmes de fichiers n'ont pas tous la
+    # résolution des horodatages HTTP.
+    return dest.stat().st_mtime + 1 >= blob.last_modified.timestamp()
 
 
 def ensure_models() -> Path:
@@ -78,10 +108,15 @@ def ensure_models() -> Path:
         disponibles.append(nom)
 
         dest = cache / nom
-        if dest.exists() and dest.stat().st_size == blob.size:
-            continue  # déjà en cache et complet (invocation à chaud)
+        if _a_jour(dest, blob):
+            continue  # déjà en cache, complet et pas plus vieux que le blob
         with open(dest, "wb") as f:
             f.write(client.get_blob_client(nom).download_blob().readall())
+        # Aligner l'horodatage local sur celui du blob : c'est ce qui rend la
+        # comparaison suivante fiable, y compris après un redéploiement.
+        if blob.last_modified is not None:
+            horodatage = blob.last_modified.timestamp()
+            os.utime(dest, (horodatage, horodatage))
 
     manquants = [nom for nom in REQUIRED if nom not in disponibles]
     if manquants:

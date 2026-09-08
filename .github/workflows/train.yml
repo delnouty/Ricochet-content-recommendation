@@ -56,6 +56,11 @@ jobs:
       - name: Construire les artefacts (période d'entraînement uniquement)
         run: |
           python -m src.prepare_model --data-dir data/news-portal-user --out-dir models
+          # `prepare_model` ne construit pas le SVD : sans cette ligne, le jeu
+          # d'artefacts publié plus bas n'en contient aucun et la stratégie
+          # « SVD Surprise » de l'application est simplement absente.
+          python -m src.collaborative_surprise --data-dir data/news-portal-user \
+            --out-dir models
           python -m src.evaluate --data-dir data/news-portal-user --out-dir models_split \
             --split test --track --json metrics.json
 

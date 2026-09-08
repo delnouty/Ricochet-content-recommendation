@@ -48,13 +48,27 @@ python -m src.prepare_model --data-dir data/news-portal-user --out-dir models
 python -m src.collaborative_surprise --data-dir data/news-portal-user --out-dir models
 ```
 
-Compter environ **dix minutes** : ACP sur 364 047 articles, ALS sur 3 millions de
-clics, puis SVD sur 12 millions d'exemples.
+Compter environ **vingt minutes** : ACP sur 364 047 articles, ALS sur 3 millions de
+clics, puis SVD sur ~15 millions d'exemples (les clics, plus 4 négatifs
+échantillonnés par clic).
 
-Résultat attendu — 22 fichiers, environ 265 Mo :
+La seconde commande produit la variante de SVD **retenue** par le notebook 06 :
+notes binaires avec négatifs échantillonnés. C'est la valeur par défaut depuis
+qu'un défaut mal choisi a montré ce que cela coûte : elle valait auparavant
+« étoiles de l'article, aucun négatif », c'est-à-dire la variante que l'étude
+rejette (HitRate@5 nul, parce qu'une note qui ne dépend que de l'article ne peut
+pas classer pour un lecteur). La commande ci-dessus n'ayant aucun drapeau, elle
+produisait ce modèle-là, et le bouton « SVD Surprise » de l'application le
+servait — sans qu'aucune erreur ne se lève. Pour reproduire l'ancienne variante à
+titre de comparaison : `--rating stars --negatives 0`.
+
+Résultat attendu — **22 artefacts, environ 253 Mo**, plus trois fichiers qui ne
+sont pas publiés : `.gitkeep`, et les deux relevés de mesure
+`baseline_metrics.json` (référence de la porte de qualité) et
+`freshness_sweep.json` (effet de la fenêtre). Le compte total est donc de 25.
 
 ```powershell
-Get-ChildItem models | Measure-Object -Property Length -Sum |
+Get-ChildItem models -File | Measure-Object -Property Length -Sum |
   ForEach-Object { "{0} fichiers, {1:N0} Mo" -f $_.Count, ($_.Sum / 1MB) }
 ```
 
@@ -62,7 +76,7 @@ Deux paramètres déterminent la qualité du service :
 
 | Paramètre | Défaut | Rôle |
 |---|---|---|
-| `--window-hours` | 1 | fenêtre du classement par popularité. **Levier principal** : HitRate@5 de 0,2525 sur une heure contre 0,0010 sur tout l'historique |
+| `--window-hours` | 1 | fenêtre du classement par popularité. **Levier principal** : HitRate@5 de 0,2525 sur une heure contre 0,0060 sur tout l'historique, soit un facteur 42 (`models/freshness_sweep.json`) |
 | `--candidate-hours` | 6 | fenêtre du vivier de candidats des stratégies personnalisées |
 
 ---
@@ -73,7 +87,7 @@ Deux paramètres déterminent la qualité du service :
 Sans elle, un problème dans le cloud est indiscernable d'un problème d'artefacts.
 
 ```powershell
-python -m pytest tests/ -q                  # 48 tests, aucune donnée requise
+python -m pytest tests/ -q                  # 52 tests, aucune donnée requise
 python scripts/sync_recommender.py --check   # copies déployées à jour
 python scripts/serve_local.py                # service local, port 7071
 ```
@@ -334,14 +348,44 @@ que le service fonctionne, pas pour montrer le produit.
 | Ce qui change | À faire |
 |---|---|
 | **Fenêtre de fraîcheur** (`popular_recent.npy`, `candidates_recent.npy`, `recent_window.json`) | refaire l'étape 6 — **et c'est tout** : ces trois fichiers arrivent par *blob input binding*, relus à chaque appel |
-| Autres artefacts (ré-entraînement, nouveau catalogue) | refaire l'étape 6, puis `az functionapp restart --name func-ricochet-darya --resource-group rg-ricochet` |
+| Autres artefacts (ré-entraînement, nouveau catalogue) | refaire l'étape 6, puis **refaire l'étape 8** — voir l'avertissement ci-dessous, `restart` ne suffit pas |
 | Code de la Function | refaire l'étape 8 |
 | Code partagé (`src/`) | `python scripts/sync_recommender.py` **avant** l'étape 8, sinon les copies déployées restent périmées |
 
-Le redémarrage reste obligatoire pour les **artefacts lourds** (254 Mo) : les instances
-les gardent en cache local et ne les revérifient pas. Il ne l'est plus pour la
-fraîcheur, qui change toutes les heures et ne pouvait pas dépendre d'un redémarrage
-horaire du service (voir `docs/architecture.md` § 3.a, « Deux accès à Blob Storage »).
+La fraîcheur, elle, ne demande plus rien : elle change toutes les heures et ne
+pouvait pas dépendre d'un redémarrage horaire du service (voir
+`docs/architecture.md` § 3.a, « Deux accès à Blob Storage »).
+
+### ⚠️ Remplacer un artefact lourd : `restart` ne suffit pas
+
+Les instances gardent les 253 Mo dans un cache local, relu au seul démarrage à
+froid. Deux pièges se sont produits en remplaçant le modèle SVD :
+
+1. **`az functionapp restart` ne vide pas toutes les instances.** Après le
+   redémarrage, le service alternait entre l'ancien et le nouveau modèle selon
+   l'instance touchée : sur dix appels identiques, six réponses nouvelles et
+   quatre anciennes. Un `stop` suivi d'un `start` a ramené le résidu à une
+   réponse sur douze, sans l'éliminer.
+2. **La validité du cache se jugeait sur la taille du fichier.** Le SVD
+   reconstruit avec une autre définition de note a exactement la même taille —
+   même nombre de lecteurs, même nombre de facteurs. L'instance dont le cache
+   avait survécu ne l'a donc jamais retéléchargé. Corrigé : `_a_jour()` dans
+   `shared_code/blob_utils.py` compare aussi la date du blob, et six tests
+   couvrent le cas (`tests/test_blob_cache.py`).
+
+**Marche à suivre** : après l'étape 6, refaire l'étape 8. Un déploiement remplace
+les instances, ce qu'un redémarrage ne garantit pas.
+
+**Contrôle** — le même appel, répété : si les réponses diffèrent d'un appel à
+l'autre, des instances servent encore l'ancien modèle.
+
+```powershell
+1..15 | ForEach-Object {
+  (Invoke-RestMethod "$base/api/recommend?user_id=0&n=5&method=svd&code=$key").recommendations -join ", "
+} | Group-Object | Select-Object Count, Name
+```
+
+Une seule ligne en sortie = service cohérent.
 
 Vérifier que le mécanisme fonctionne, sans redémarrer :
 
@@ -370,7 +414,8 @@ change aussi.
 | `401` dans le navigateur | clé absente de l'URL | ajouter `&code=<clé>` |
 | `File does not exist: app\streamlit_app.py` | commande lancée depuis un sous-dossier | revenir à la racine du dépôt |
 | **Réponses différentes du local, sans aucune erreur** | le chargeur d'artefacts suivait une **liste figée** : les fichiers ajoutés après elle (fraîcheur, étoiles, SVD) n'étaient pas téléchargés | corrigé — le chargeur **énumère** le conteneur ; trois fichiers seulement restent obligatoires, et leur absence lève une erreur explicite |
-| Latence de 8 à 9 s par intermittence | démarrage à froid : instance libérée, 265 Mo retéléchargés | normal, voir étape 13 |
+| **Réponses qui changent d'un appel à l'autre**, pour la même requête | des instances servent encore l'ancien modèle : leur cache local a survécu au redémarrage, et sa validité était jugée sur la seule taille du fichier — identique après reconstruction du SVD | corrigé — `_a_jour()` compare aussi la date du blob ; et après un remplacement d'artefact lourd, **redéployer** (étape 8) plutôt que redémarrer |
+| Latence de 8 à 9 s par intermittence | démarrage à froid : instance libérée, 253 Mo retéléchargés | normal, voir étape 13 |
 
 La ligne en gras est la plus instructive : **le service répondait correctement, sans
 erreur ni avertissement**, tout en servant la popularité de tout l'historique au lieu

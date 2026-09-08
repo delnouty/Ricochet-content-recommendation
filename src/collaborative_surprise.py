@@ -206,12 +206,22 @@ def main() -> None:
     parser.add_argument("--epochs", default=20, type=int)
     parser.add_argument("--max-rating", default=5, type=int,
                         help="borne haute de la note (nombre de clics)")
-    parser.add_argument("--negatives", default=0, type=int,
-                        help="exemples négatifs par positif (0 = aucun)")
-    parser.add_argument("--rating", default="stars", choices=["stars", "clicks"],
-                        help="source de la note : 'stars' = étoiles de l'article "
-                             "(article_stars.npy, échelle 1-5) ; 'clicks' = nombre "
-                             "de clics du couple, borné")
+    # Défauts = la variante retenue par le notebook 06. Ils valaient auparavant
+    # « stars » et 0 négatif, c'est-à-dire la variante que l'étude **rejette**
+    # (HitRate@5 nul). La commande documentée dans `docs/deploiement_azure.md`
+    # n'ayant aucun drapeau, elle produisait ce modèle-là, et le bouton « SVD
+    # Surprise » de l'application le servait.
+    parser.add_argument("--negatives", default=4, type=int,
+                        help="exemples négatifs par positif (défaut 4 : optimum "
+                             "mesuré ; 0 = aucun, la tâche n'est plus un "
+                             "classement et le modèle ne classe pas)")
+    parser.add_argument("--rating", default="clicks", choices=["stars", "clicks"],
+                        help="source de la note : 'clicks' = nombre de clics du "
+                             "couple, borné (défaut, ramené au binaire par les "
+                             "négatifs) ; 'stars' = étoiles de l'article "
+                             "(article_stars.npy), conservé pour comparaison — "
+                             "la note ne dépend alors que de l'article et le "
+                             "modèle ne peut pas personnaliser")
     args = parser.parse_args()
 
     from src.prepare_model import load_clicks
