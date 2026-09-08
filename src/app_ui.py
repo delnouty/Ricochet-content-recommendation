@@ -483,9 +483,23 @@ def run(models_dir, clients_db, banniere: str | None = None,
 
     with st.sidebar:
         st.header("Système")
-        st.caption("Exécution locale : modèle chargé dans ce processus, "
-                   "aucun service externe.")
-        st.caption(f"Artefacts : `{models_dir}`")
+        # Le moteur peut être un mandataire HTTP (`app/api_client.ApiRecommender`,
+        # solution Azure) : affirmer « aucun service externe » serait alors faux,
+        # et contredirait la bannière affichée juste au-dessus.
+        service = getattr(reco, "url", None)
+        if service:
+            hote = service.split("/api/")[0]
+            st.caption(f"Classement calculé par un **service distant** : `{hote}`. "
+                       "Aucun modèle n'est embarqué ici.")
+            latence = getattr(reco, "derniere_latence_ms", None)
+            if latence is not None:
+                st.caption(f"Dernier appel : {latence:.0f} ms")
+            st.caption(f"Artefacts d'**affichage** : `{models_dir}` "
+                       "(notes, historiques, métadonnées — pas les embeddings)")
+        else:
+            st.caption("Exécution locale : modèle chargé dans ce processus, "
+                       "aucun service externe.")
+            st.caption(f"Artefacts : `{models_dir}`")
         st.caption(f"Catalogue : {reco.n_articles:,} articles")
         st.caption(f"Clients inscrits : {len(store.list_clients())}")
         st.caption(f"Utilisateurs du jeu de données : "
