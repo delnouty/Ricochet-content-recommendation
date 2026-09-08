@@ -80,19 +80,41 @@ def test_classement_par_popularite_dans_la_fenetre(tmp_path):
 
 
 # ------------------------------------------------------ application par le moteur
-def test_les_quatre_strategies_respectent_le_vivier(models_dir_cf):
-    """Aucune stratégie ne doit recommander hors du vivier — hybrid inclus.
+def test_toutes_les_strategies_respectent_le_vivier(models_dir_cf):
+    """Aucune stratégie ne doit recommander hors du vivier — `mix` inclus.
 
-    `hybrid` est la stratégie par défaut de l'application : l'oublier reviendrait à
-    n'appliquer la fraîcheur qu'en apparence.
+    `mix` est la stratégie **servie en production** : l'omettre de cette boucle
+    reviendrait à ne vérifier la fraîcheur que sur les stratégies de comparaison.
+    Elle en était absente jusqu'à la revue de la spécification fonctionnelle.
     """
     _ecrire_vivier(models_dir_cf, [2, 3, 4, 5])
     reco = Recommender(models_dir_cf)
 
-    for methode in ("hybrid", "content", "collab"):
+    for methode in ("mix", "hybrid", "content", "collab", "svd"):
         recs = reco.recommend(100, n=2, method=methode)
         assert recs, f"{methode} ne renvoie rien"
         assert set(recs) <= {2, 3, 4, 5}, f"{methode} sort du vivier : {recs}"
+
+
+def test_mix_reserve_une_place_au_contenu(models_dir_cf):
+    """`mix` = 4 places de popularité + 1 place de contenu (FS-017).
+
+    C'est la composition qui justifie la stratégie retenue : la place donnée au
+    contenu multiplie la couverture du catalogue sans coûter de justesse
+    mesurable. Sans ce test, rien ne garantit que la cinquième place existe.
+    """
+    _ecrire_vivier(models_dir_cf, [1, 2, 3, 4, 5])
+    reco = Recommender(models_dir_cf)
+
+    populaires = reco.popular_recent[:4].tolist()
+    recs = reco.recommend(100, n=5, method="mix")
+
+    assert len(recs) == 5, f"cinq places attendues, obtenu {recs}"
+    assert recs[:4] == populaires, (
+        f"les quatre premières places doivent suivre la popularité récente "
+        f"{populaires}, obtenu {recs[:4]}")
+    assert recs[4] not in populaires, (
+        "la cinquième place doit venir du contenu, pas de la popularité")
 
 
 def test_fresh_only_desactivable(models_dir_cf):

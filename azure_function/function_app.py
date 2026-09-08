@@ -27,10 +27,10 @@ invocation : le service prend donc en compte une nouvelle fenêtre **sans
 redémarrage**. Coût mesuré : ~2 ms par appel.
 
 **SDK avec cache au démarrage à froid** pour les artefacts lourds (catalogue
-d'embeddings et historiques, 109 Mo). Un binding les retéléchargerait à chaque
-invocation : 8 s par appel au lieu de 0,2 s, soit un facteur 40, et 26 Go de
-trafic pour 100 appels. Le cache est donc le bon choix ici — ils ne changent
-qu'au ré-entraînement.
+d'embeddings, historiques, étoiles et facteurs : 253 Mo). Un binding les
+retéléchargerait à chaque invocation : 8 s par appel au lieu de 0,2 s, soit un
+facteur 40. Le cache est donc le bon choix ici — ils ne changent qu'au
+ré-entraînement.
 
 Le Recommender est instancié une seule fois (démarrage à froid) puis réutilisé ;
 seule sa fraîcheur est rafraîchie à chaque appel.
@@ -135,7 +135,8 @@ def recommend(req: func.HttpRequest, popular_recent: func.InputStream,
         )
 
 
-    # Fraîcheur : le levier le plus fort du projet (facteur 250 sur la précision).
+    # Fraîcheur : le levier le plus fort du projet (facteur 42 sur la précision,
+    # mesuré sur la période de test — voir models/freshness_sweep.json).
     # Exposé en paramètre pour que le client puisse démontrer l'écart, mais activé
     # par défaut — c'est la configuration servie en production.
     raw_fresh = _param(req, "fresh_only", body)

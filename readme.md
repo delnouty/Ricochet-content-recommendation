@@ -259,6 +259,7 @@ python scripts/sync_recommender.py --check   # CI mode: fails if a copy is stale
 - [docs/deploiement_azure.md](docs/deploiement_azure.md) — **step-by-step Azure deployment**: resource creation through to a verified live endpoint, with the errors actually hit and their causes.
 - [docs/mlops.md](docs/mlops.md) — temporal split, MLflow tracking, model registry, metric gate, CI.
 - [docs/architecture.md](docs/architecture.md) — MVP architecture, alternatives considered, target architecture.
+- [docs/sequences.md](docs/sequences.md) — UML sequence diagrams for the three deployments: where the ranking is computed, what a cold start costs, and how a just-registered reader is served by a stateless API.
 - `docs/gxp/` — GAMP 5 / CSV documentation pack (VP, URS, FS, RA, RTM, IQ/OQ/PQ, VSR), **DRAFT**.
   GxP impact assessed as low: consumer-facing application, no patient or clinical data.
   These are assistive supporting documents and must be reviewed by a QA/CSV professional

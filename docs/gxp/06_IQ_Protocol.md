@@ -3,10 +3,11 @@
 | Champ | Valeur |
 |-------|--------|
 | ID document | MC-IQ-001 |
-| Version | 0.1 |
+| Version | 0.2 |
 | Statut | DRAFT — pour exécution après approbation |
 | Système | My Content — système de recommandation d'articles |
-| Date d'émission | 2026-07-20 |
+| Date d'émission | 2026-09-08 |
+| Remplace | Version 0.1 du 2026-07-20 |
 
 > **Support assistif — à réviser et approuver par l'AQ/CSV avant exécution.**
 
@@ -20,7 +21,7 @@ disponible ; artefacts de modèle générés.
 
 | ID | Vérification | Méthode | Critère d'acceptation | Résultat (P/F) | Preuve | Exécutant/Date |
 |----|--------------|---------|-----------------------|----------------|--------|----------------|
-| IQ-01 | Version de Python | `python --version` | Version conforme à FS (≥ 3.11) | | capture | |
+| IQ-01 | Version de Python | `python --version` en local ; `az functionapp config show --query linuxFxVersion` pour la Function | Conforme à **FS-028** : Python 3.13 pour la Function (plan Flex Consumption), ≥ 3.11 en local | | captures | |
 | IQ-02 | Dépôt de code cloné et versionné | `git log -1` | Commit identifiable (hash, auteur, date) | | capture | |
 | IQ-03 | Artefacts de modèle présents et nommés | Lister `models/` (ou conteneur Blob / dépôt HF Hub) | `articles_embeddings_pca.npy`, `user_clicks.pkl`, `popular_articles.npy` (+ `cf_*` si collaboratif) présents | | listing | |
 | IQ-04 | Dépendances installées (env de proto) | `pip install -r requirements.txt` | Installation sans erreur | | log | |

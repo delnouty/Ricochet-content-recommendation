@@ -37,7 +37,7 @@ def test_jamais_de_liste_vide(models_dir_cf):
     reco = Recommender(models_dir_cf)
     reco.user_clicks[500] = np.array([2, 3], dtype=np.int64)   # a lu tout le vivier
 
-    for methode in ("hybrid", "content", "collab", "svd"):
+    for methode in ("mix", "hybrid", "content", "collab", "svd"):
         recs = reco.recommend(500, n=3, method=methode)
         assert recs, f"{methode} renvoie une liste vide"
         assert not ({2, 3} & set(recs)), f"{methode} recommande un article déjà lu"
@@ -131,7 +131,7 @@ def test_identifiant_hors_catalogue_injecte_apres_chargement(models_dir_cf):
     reco = Recommender(models_dir_cf)
     reco.user_clicks[502] = np.array([reco.n_articles + 10, 0], dtype=np.int64)
 
-    for methode in ("hybrid", "content", "collab", "svd"):
+    for methode in ("mix", "hybrid", "content", "collab", "svd"):
         recs = reco.recommend(502, n=2, method=methode)   # ne doit pas lever
         assert all(0 <= a < reco.n_articles for a in recs)
 

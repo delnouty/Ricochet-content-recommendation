@@ -3,7 +3,7 @@
 | Champ | Valeur |
 |-------|--------|
 | ID document | MC-VAL-001 |
-| Version | 0.1 |
+| Version | 0.2 |
 | Statut | DRAFT — pour revue AQ |
 | Système | My Content — système de recommandation d'articles |
 | Date d'émission | 2026-07-20 |
@@ -38,11 +38,19 @@ constitution du jeu de données source (Globo.com), traité comme donnée d'entr
 
 ## 3. Description du système
 
-Système de recommandation restituant une sélection d'articles (par défaut 5)
-pour un identifiant utilisateur, à partir de trois stratégies (content-based,
-collaboratif ALS, hybride) avec repli sur la popularité (cold start). Déployé
-selon **deux solutions indépendantes** : serverless Azure Functions et Space
-Hugging Face. Voir `docs/architecture.md`.
+Système de recommandation restituant une sélection d'articles (par défaut 5) pour
+un identifiant de lecteur, à partir de **cinq stratégies** : contenu,
+collaboratif ALS, collaboratif SVD, hybride, et la stratégie **mixte servie en
+production** (quatre places de popularité récente et une place de contenu). Un
+lecteur sans profil exploitable est traité par une **cascade de repli** allant de
+la popularité de sa région croisée avec la fenêtre de fraîcheur jusqu'à la
+popularité sur tout l'historique.
+
+Déployé selon **trois solutions indépendantes** : serverless Azure Functions,
+Space Hugging Face (SDK Docker), et exécution locale sans réseau.
+
+Voir `docs/architecture.md` (vue statique) et `docs/sequences.md` (diagrammes de
+séquence des trois solutions).
 
 ## 4. Approche de validation (basée sur le risque)
 

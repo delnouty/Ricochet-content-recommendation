@@ -35,6 +35,10 @@ Trois stratégies, exposées via un même service :
 
 ## 3. Architecture technique retenue — deux solutions indépendantes
 
+> Le détail dynamique — qui appelle qui, dans quel ordre, et ce que coûte un
+> démarrage à froid — est dans [`sequences.md`](sequences.md), sous forme de
+> diagrammes de séquence UML pour chacun des trois déploiements.
+
 Le même cœur de reco (`src/recommender.py`) et les mêmes artefacts alimentent
 **deux solutions de déploiement autonomes**, chacune complète en elle-même.
 
