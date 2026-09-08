@@ -40,11 +40,11 @@
       "couverture %": 0.116,
       "personnalisation %": 21.5
     },
-    "SVD (Surprise)": {
-      "HitRate@5": 0.0005,
-      "Recall@5": 0.0001,
-      "couverture %": 0.008,
-      "personnalisation %": 24.7
+    "SVD (binaire + 4 négatifs)": {
+      "HitRate@5": 0.022,
+      "Recall@5": 0.0029,
+      "couverture %": 0.01,
+      "personnalisation %": 55.9
     }
   }
 }

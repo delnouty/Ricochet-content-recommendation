@@ -31,13 +31,34 @@ GRIS = "#7F8C8D"
 SORTIE = Path("docs/figures")
 
 # --- Effet de la fenêtre de comptage, à algorithme constant -----------------
-# Une seule variable change : la durée sur laquelle on compte les clics.
-FENETRES = [
-    ("1 heure", 0.2190, 791),
-    ("6 heures", 0.1480, 2657),
-    ("24 heures", 0.1060, 6777),
-    ("tout l'historique\n(240 h)", 0.0075, 29118),
-]
+# Lu dans le relevé de `scripts/sweep_fraicheur.py`, et non recopié. La figure
+# affichait auparavant les valeurs de validation sous une annotation « facteur
+# 250 » tirée d'une autre mesure : le rapport des nombres affichés valait 29.
+RELEVE_FRAICHEUR = Path("models/freshness_sweep.json")
+
+# Les quatre fenêtres montrées : la fenêtre de production, deux paliers, et la
+# totalité de l'historique. Le relevé en contient huit — toutes ne se lisent pas
+# sur une diapositive.
+FENETRES_AFFICHEES = (1, 6, 24, 240)
+
+
+def charger_fraicheur() -> tuple[list[tuple[str, float, int]], float]:
+    """(libellé, HitRate@5, candidats) par fenêtre, et le facteur extrême."""
+    import json
+
+    releve = json.loads(RELEVE_FRAICHEUR.read_text(encoding="utf-8"))
+    par_heure = {l["fenetre_h"]: l for l in releve["fenetres"]}
+    lignes = []
+    for heures in FENETRES_AFFICHEES:
+        if heures not in par_heure:
+            raise ValueError(f"fenêtre {heures} h absente de {RELEVE_FRAICHEUR}")
+        ligne = par_heure[heures]
+        if heures == max(par_heure):
+            libelle = f"tout l'historique\n({heures} h)"
+        else:
+            libelle = f"{heures} heure" + ("s" if heures > 1 else "")
+        lignes.append((libelle, ligne["HitRate@5"], ligne["candidats"]))
+    return lignes, releve["facteur_1h_vs_tout"]
 
 # --- Les cinq configurations, dans leur meilleur réglage ---------------------
 # Lues dans le fichier de référence, et non recopiées : c'est ce même fichier qui
@@ -51,8 +72,13 @@ ETIQUETTES = {
     "popularité 1 h": ("Popularité 1 h", False),
     "mixte 4 popularité + 1 contenu": ("Mixte\n4 pop. + 1 contenu", True),
     "contenu (vivier 6 h)": ("Contenu\nvivier 6 h", False),
-    "SVD (Surprise)": ("SVD Surprise", False),
 }
+
+# Les noms de l'ALS et du SVD portent leur configuration, qui peut changer :
+# on les reconnaît par leur préfixe et on garde le libellé mesuré. Une table
+# d'équivalences figée avait déjà fait disparaître la ligne SVD de la figure,
+# sans erreur, le jour où la référence l'a renommée.
+PREFIXES = ("ALS", "SVD")
 
 
 def charger_configs() -> list[tuple[str, float, float, bool]]:
@@ -64,12 +90,18 @@ def charger_configs() -> list[tuple[str, float, float, bool]]:
     for nom, metriques in donnees["toutes_strategies"].items():
         if nom in ETIQUETTES:
             libelle, retenu = ETIQUETTES[nom]
-        elif nom.startswith("ALS"):
-            # Le libellé porte la fenêtre et les facteurs réellement mesurés :
+        elif nom.startswith(PREFIXES):
+            # Le libellé porte la configuration réellement mesurée :
             # « ALS (24 h, 16 facteurs) » -> « ALS\n24 h, 16 facteurs ».
-            libelle, retenu = "ALS\n" + nom[nom.find("(") + 1:-1], False
+            debut = nom.find("(")
+            detail = nom[debut + 1:-1] if debut != -1 else ""
+            libelle = f"{nom.split()[0]}\n{detail}".rstrip("\n")
+            retenu = False
         else:
-            continue
+            raise ValueError(
+                f"Stratégie « {nom} » inconnue de la figure. L'ignorer en "
+                "silence ferait disparaître un point du graphique : ajouter "
+                "son libellé à ETIQUETTES ou son préfixe à PREFIXES.")
         configs.append((libelle, metriques["HitRate@5"],
                         metriques["couverture %"], retenu))
     return configs
@@ -97,16 +129,17 @@ def _virgule(ax, axe: str = "x") -> None:
 
 
 def figure_fraicheur(chemin: Path) -> None:
-    """La fraîcheur pèse plus que le modèle : facteur 250 sur la précision."""
+    """La fraîcheur pèse plus que le modèle, et de combien exactement."""
     fig, ax = plt.subplots(figsize=(8.2, 2.7))
 
-    etiquettes = [f[0] for f in FENETRES]
-    valeurs = [f[1] for f in FENETRES]
-    candidats = [f[2] for f in FENETRES]
-    positions = range(len(FENETRES))
+    fenetres, facteur = charger_fraicheur()
+    etiquettes = [f[0] for f in fenetres]
+    valeurs = [f[1] for f in fenetres]
+    candidats = [f[2] for f in fenetres]
+    positions = range(len(fenetres))
 
     # La première barre est celle retenue : elle seule porte la couleur d'accent.
-    couleurs = [ACCENT2] + [ACCENT] * (len(FENETRES) - 1)
+    couleurs = [ACCENT2] + [ACCENT] * (len(fenetres) - 1)
     ax.barh(list(positions), valeurs, color=couleurs, height=0.6)
 
     # Colonne des candidats calée à droite de la barre la plus longue, sinon
@@ -114,21 +147,26 @@ def figure_fraicheur(chemin: Path) -> None:
     for y, (valeur, nb) in enumerate(zip(valeurs, candidats)):
         ax.text(valeur + 0.006, y, f"{valeur:.4f}".replace(".", ","),
                 va="center", fontsize=11.5, color=PRIMARY, fontweight="bold")
-        ax.text(0.335, y, f"{nb:,} candidats".replace(",", " "),
+        ax.text(0.375, y, f"{nb:,} candidats".replace(",", " "),
                 va="center", ha="right", fontsize=10, color=GRIS)
 
     ax.set_yticks(list(positions), etiquettes, fontsize=11)
     ax.invert_yaxis()
-    ax.set_xlim(0, 0.34)
+    ax.set_xlim(0, 0.38)
     ax.set_xticks([0, 0.05, 0.10, 0.15, 0.20, 0.25])
-    ax.set_xlabel("HitRate@5", fontsize=10.5, color=PRIMARY)
+    ax.set_xlabel("HitRate@5 mesuré sur la période de test", fontsize=10.5,
+                  color=PRIMARY)
     ax.set_title("Même algorithme, seule la fenêtre de comptage change",
                  fontsize=12, color=PRIMARY, fontweight="bold", loc="left")
     _habiller(ax)
     _virgule(ax, "x")
 
-    # La flèche dit ce que les barres montrent, sans commentaire à l'oral.
-    ax.annotate("facteur 250", xy=(0.010, 3), xytext=(0.105, 2.62),
+    # La flèche dit ce que les barres montrent, sans commentaire à l'oral. Le
+    # facteur vient du relevé : l'écrire à la main est précisément l'erreur qui
+    # a mis « 250 » sous des nombres dont le rapport valait 29.
+    ax.annotate(f"facteur {facteur:.0f}",
+                xy=(valeurs[-1] + 0.004, len(fenetres) - 1),
+                xytext=(0.105, len(fenetres) - 1.38),
                 fontsize=12, color=ACCENT2, fontweight="bold",
                 arrowprops=dict(arrowstyle="-|>", color=ACCENT2, lw=1.4,
                                 connectionstyle="arc3,rad=0.25"))
@@ -154,17 +192,22 @@ def figure_compromis(chemin: Path) -> None:
     # chevauche. L'ancrage évite que les libellés de droite sortent du cadre.
     # Clé = premier mot du libellé, pour que « ALS 24 h » reste reconnu si la
     # fenêtre retenue change.
+    # (dx, dy, alignement horizontal, alignement vertical). Le `va` est explicite
+    # parce que ces libellés font deux lignes : sans lui, le bloc s'étale du
+    # mauvais côté du point. L'ALS et le SVD sont proches — 0,0415 contre 0,0220
+    # depuis la correction du protocole — donc l'un monte et l'autre descend.
     decalages = {
-        "Popularité": (-10, 2, "right"),
-        "Mixte": (-10, 6, "right"),
-        "ALS": (12, -2, "left"),
-        "Contenu": (12, -2, "left"),
-        "SVD": (12, -8, "left"),
+        "Popularité": (-10, 2, "right", "bottom"),
+        "Mixte": (-10, 6, "right", "bottom"),
+        "ALS": (12, 3, "left", "bottom"),
+        "Contenu": (12, 3, "left", "bottom"),
+        "SVD": (12, -5, "left", "top"),
     }
     for libelle, hitrate, couverture, retenu in configs:
-        dx, dy, ancre = decalages[libelle.split()[0].split("\n")[0]]
+        dx, dy, ancre_h, ancre_v = decalages[libelle.split()[0].split("\n")[0]]
         ax.annotate(libelle, xy=(hitrate, couverture),
-                    xytext=(dx, dy), textcoords="offset points", ha=ancre,
+                    xytext=(dx, dy), textcoords="offset points",
+                    ha=ancre_h, va=ancre_v,
                     fontsize=10.5, color=ACCENT2 if retenu else PRIMARY,
                     fontweight="bold" if retenu else "normal")
 

@@ -58,6 +58,7 @@ metrics.json
 # Exception : la référence de métriques est le contrat de la porte de qualité,
 # elle DOIT être versionnée (sinon la CI n'a rien à comparer).
 !models/baseline_metrics.json
+!models/freshness_sweep.json
 
 # Fichiers intermédiaires LaTeX (le .tex est la source, le .pdf est versionné)
 docs/*.aux

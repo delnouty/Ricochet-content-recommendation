@@ -1,0 +1,72 @@
+{
+  "split": "test",
+  "lecteurs": 2000,
+  "clics_historique": 2390544,
+  "facteur_1h_vs_tout": 42.1,
+  "fenetres": [
+    {
+      "fenetre_h": 1,
+      "candidats": 684,
+      "HitRate@5": 0.2525,
+      "Recall@5": 0.0555,
+      "couverture %": 0.003,
+      "personnalisation %": 4.0
+    },
+    {
+      "fenetre_h": 3,
+      "candidats": 1371,
+      "HitRate@5": 0.202,
+      "Recall@5": 0.0362,
+      "couverture %": 0.003,
+      "personnalisation %": 15.2
+    },
+    {
+      "fenetre_h": 6,
+      "candidats": 2101,
+      "HitRate@5": 0.159,
+      "Recall@5": 0.0269,
+      "couverture %": 0.004,
+      "personnalisation %": 18.4
+    },
+    {
+      "fenetre_h": 12,
+      "candidats": 3147,
+      "HitRate@5": 0.1535,
+      "Recall@5": 0.0267,
+      "couverture %": 0.004,
+      "personnalisation %": 16.1
+    },
+    {
+      "fenetre_h": 24,
+      "candidats": 4454,
+      "HitRate@5": 0.0465,
+      "Recall@5": 0.0071,
+      "couverture %": 0.004,
+      "personnalisation %": 18.3
+    },
+    {
+      "fenetre_h": 48,
+      "candidats": 8853,
+      "HitRate@5": 0.0305,
+      "Recall@5": 0.0052,
+      "couverture %": 0.006,
+      "personnalisation %": 19.3
+    },
+    {
+      "fenetre_h": 72,
+      "candidats": 13122,
+      "HitRate@5": 0.0205,
+      "Recall@5": 0.0032,
+      "couverture %": 0.006,
+      "personnalisation %": 21.1
+    },
+    {
+      "fenetre_h": 240,
+      "candidats": 32582,
+      "HitRate@5": 0.006,
+      "Recall@5": 0.0004,
+      "couverture %": 0.007,
+      "personnalisation %": 17.0
+    }
+  ]
+}

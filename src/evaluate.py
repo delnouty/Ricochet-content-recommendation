@@ -63,6 +63,10 @@ def build_artifacts(clicks_train: pd.DataFrame, source_models: Path, out_dir: Pa
     celle que l'étude rejette. La mesure de référence rapportait donc 0,0000 pour
     le SVD — un chiffre exact pour un modèle que personne n'aurait déployé.
     Mettre 0 ici reproduit cet ancien comportement.
+
+    Note : ces artefacts SVD ne servent qu'à `evaluate(svd_refit=False)`, puisque
+    la mesure ré-entraîne le SVD sur l'historique complet. Les construire coûte
+    ~6 minutes qu'un `--no-svd` fait gagner si l'on ne se sert pas de ce repli.
     """
     from src.prepare_model import (build_article_stars, build_collaborative,
                                    build_segment_popularity, build_user_artifacts)
@@ -100,13 +104,55 @@ def build_artifacts(clicks_train: pd.DataFrame, source_models: Path, out_dir: Pa
         save_artifacts(algo, trainset, out_dir)
 
 
+def svd_strategie(reco, clicks_history: pd.DataFrame, pool: np.ndarray,
+                  negatives: int = 4, models_dir: Path | None = None,
+                  factors: int = 50, epochs: int = 20):
+    """Entraîne un SVD sur `clicks_history` et renvoie sa stratégie de classement.
+
+    `negatives=0` prend la variante « étoiles de l'article » (qui exige
+    `article_stars.npy` dans `models_dir`) ; sinon la variante binaire avec
+    négatifs échantillonnés.
+
+    Le modèle est posé sur une **copie superficielle** du `Recommender` : les
+    facteurs sont propres à cet appel, tandis que les profils de lecture restent
+    partagés. C'est ce qui permet de comparer deux variantes de SVD dans une même
+    mesure — sinon la seconde écraserait la première.
+
+    Pourquoi ne pas lire les artefacts du dossier : parce que l'étiquette de la
+    ligne mentirait dès que le contenu du dossier change. C'est arrivé — la ligne
+    « SVD (étoiles) » du notebook 07 a affiché des chiffres de la variante binaire
+    après une reconstruction des artefacts, sans qu'aucune erreur ne se lève.
+    """
+    import copy
+
+    from src import experiments as xp
+    from src.collaborative_surprise import (add_negative_samples, build_ratings,
+                                            build_ratings_from_stars,
+                                            extract_factors, train_svd)
+
+    if negatives > 0:
+        notes = add_negative_samples(build_ratings(clicks_history), negatives)
+    else:
+        if models_dir is None:
+            raise ValueError("La variante « étoiles » exige `models_dir` "
+                             "(pour y lire article_stars.npy).")
+        notes = build_ratings_from_stars(clicks_history, Path(models_dir))
+
+    algo, trainset = train_svd(notes, n_factors=factors, n_epochs=epochs)
+    vue = copy.copy(reco)
+    for nom, valeur in extract_factors(algo, trainset).items():
+        setattr(vue, nom, valeur)
+    vue._has_svd = True
+    return xp.make_svd(vue, pool)
+
+
 def evaluate(models_dir: Path, clicks_history: pd.DataFrame, clicks_eval: pd.DataFrame,
              n: int = 5, max_users: int = 2000, pop_hours: float = 1,
              content_hours: float = 6, als_hours: float = 24,
-             als_factors: int = 16) -> pd.DataFrame:
+             als_factors: int = 16, svd_refit: bool = True) -> pd.DataFrame:
     """Mesure chaque stratégie sur une période **postérieure** à l'historique fourni.
 
-    Deux règles de protocole, établies par les notebooks 03 à 07 :
+    Trois règles de protocole, établies par les notebooks 03 à 07 :
 
     1. **Le vivier de candidats est recalculé à partir de `clicks_history`**, c'est-à-
        dire tout ce qui précède la période évaluée. Un vivier gelé à la fin de
@@ -114,6 +160,14 @@ def evaluate(models_dir: Path, clicks_history: pd.DataFrame, clicks_eval: pd.Dat
     2. **Chaque méthode reçoit sa meilleure configuration** (fenêtres et facteurs
        réglés sur la validation). Comparer une méthode réglée à des méthodes par
        défaut fausse la conclusion.
+    3. **Les deux modèles collaboratifs sont ré-entraînés sur `clicks_history`.**
+       C'est la règle qui manquait : l'ALS l'était, le SVD non — il arrivait
+       d'artefacts construits sur la seule période d'entraînement. Sur la mesure
+       de test, l'ALS connaissait donc la validation et le SVD l'ignorait, et le
+       SVD tombait à 0,0005 au lieu de 0,0160. La comparaison n'était pas
+       faussée par le modèle mais par les données qu'on lui donnait.
+       `svd_refit=False` rétablit l'ancien comportement (et fait gagner les
+       ~6 minutes d'entraînement).
 
     Les valeurs par défaut sont les optima mesurés sur la **validation** :
     popularité sur 1 h, contenu sur un vivier de 6 h, ALS entraîné sur 24 h avec
@@ -170,8 +224,11 @@ def evaluate(models_dir: Path, clicks_history: pd.DataFrame, clicks_eval: pd.Dat
         f"ALS ({als_hours} h, {als_factors} facteurs)": als,
         "mixte 4 popularité + 1 contenu": xp.make_mix(popularite, contenu, 1),
     }
-    if reco._has_svd:
-        strategies["SVD (Surprise)"] = xp.make_svd(reco, pool)
+    if svd_refit:
+        strategies["SVD (binaire + 4 négatifs)"] = svd_strategie(
+            reco, clicks_history, pool, negatives=4)
+    elif reco._has_svd:
+        strategies["SVD (artefacts du dossier)"] = xp.make_svd(reco, pool)
 
     return xp.compare(strategies, users, cible, n=n, n_articles=reco.n_articles)
 
@@ -200,6 +257,10 @@ def main() -> int:
     parser.add_argument("--skip-build", action="store_true",
                         help="réutiliser les artefacts déjà construits")
     parser.add_argument("--no-svd", action="store_true")
+    parser.add_argument("--no-svd-refit", action="store_true",
+                        help="ne pas ré-entraîner le SVD sur l'historique de la "
+                             "mesure ; plus rapide, mais le SVD est alors le seul "
+                             "modèle à ignorer la période de validation")
     parser.add_argument("--json", type=Path,
                         help="écrire les métriques dans ce fichier (porte de qualité CI)")
     parser.add_argument("--track", action="store_true",
@@ -233,7 +294,8 @@ def main() -> int:
           f"({len(historique):,} clics d'historique) ===")
     resultats = evaluate(args.out_dir, historique, evaluation, n=args.n,
                          max_users=args.max_users,
-                         als_hours=args.als_hours, als_factors=args.als_factors)
+                         als_hours=args.als_hours, als_factors=args.als_factors,
+                         svd_refit=not args.no_svd_refit)
     print()
     print(resultats.to_string())
 

@@ -7,8 +7,9 @@ un modèle ré-entraîné est empêché de partir en production s'il dégrade le
 
 Les premières mesures du projet étaient fausses : les modèles étaient entraînés sur
 100 % des données puis évalués sur ces mêmes données. L'ALS affichait un HitRate@5 de
-**0,2300** ; avec un découpage temporel correct, il tombe à **0,0250**. Un écart de
-42× qui n'était visible nulle part, parce que rien n'était tracé.
+**0,2415** ; avec un découpage temporel correct, il tombe à **0,0415** — un facteur
+**5,8** de précision imaginaire, qui n'était visible nulle part parce que rien
+n'était tracé. Le chiffre est reproductible : `python scripts/mesure_fuite.py`.
 
 Trois manques distincts :
 
@@ -29,15 +30,21 @@ des clics postérieurs à ceux qu'il doit prédire.
 t0 -------------- t60 ------------ t80 --------- tfin
 ```
 
-Deux règles, établies par les notebooks 03 à 07 :
+Trois règles, établies par les notebooks 03 à 07 :
 
 1. **le vivier de candidats est recalculé à l'instant de la requête** — pour évaluer
    sur le test, l'historique est `entraînement + validation`. Ce n'est pas une fuite :
    un service en production connaît le passé jusqu'à la minute présente. Un vivier
    gelé à la fin de l'entraînement donne **0,0000** pour toutes les méthodes ;
-2. **chaque méthode est réglée séparément** sur la validation. Comparer une méthode
-   réglée à des méthodes par défaut fausse la conclusion — l'ALS passe de 0,0080 à
-   0,0250 selon sa fenêtre d'entraînement.
+2. **chaque méthode est réglée sur la validation**, et ses réglages sont balayés
+   **ensemble**. Comparer une méthode réglée à des méthodes par défaut fausse la
+   conclusion ; juxtaposer des optima partiels la fausse aussi — l'ALS varie de
+   0,0110 à 0,0345 selon la combinaison fenêtre × facteurs, et la combinaison
+   obtenue en prenant les deux gagnants de balayages séparés est la pire des
+   quatre (notebook 05, section 3) ;
+3. **les deux modèles collaboratifs sont ré-entraînés sur l'historique de la
+   mesure.** L'ALS l'était, le SVD non : il tombait à 0,0005 au lieu de 0,0220,
+   par manque de données et non par faiblesse du modèle.
 
 Le réglage se fait sur la validation ; le test ne sert qu'à la mesure finale.
 
@@ -133,9 +140,10 @@ absentes.
 ## 7. Ce qui reste à faire
 
 - **récupération des données dans la CI** — bloque le ré-entraînement automatique ;
-- **fenêtre glissante en production** : `popular_articles.npy` et `article_stars.npy`
-  sont calculés sur tout l'historique, alors que la fenêtre d'une heure fait un
-  facteur 250 sur la précision (§4.c de `architecture.md`) ;
+- **recalcul continu de la fenêtre** : `popular_recent.npy` est aujourd'hui produit
+  par le traitement hors-ligne, alors que la fenêtre d'une heure fait un facteur
+  **42** sur la précision par rapport à tout l'historique
+  (`models/freshness_sweep.json`) ;
 - **serveur MLflow partagé** plutôt qu'un fichier SQLite local, dès qu'une deuxième
   personne lance des expériences ;
 - **surveillance en production** : les métriques mesurées ici sont hors-ligne. Le CTR

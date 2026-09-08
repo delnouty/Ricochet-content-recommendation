@@ -151,25 +151,43 @@ def train_svd(ratings: pd.DataFrame, n_factors: int = 50, n_epochs: int = 20,
     return algo, trainset
 
 
+def extract_factors(algo, trainset) -> dict:
+    """Facteurs appris, sous la forme exacte que `Recommender` attend.
+
+    Extrait ici plutôt que dans `save_artifacts` parce que deux appelants en ont
+    besoin : la sérialisation vers `models/`, et l'évaluation, qui ré-entraîne le
+    SVD sur l'historique de la mesure et n'a aucune raison d'écrire 60 Mo sur le
+    disque pour les relire aussitôt.
+    """
+    # Surprise indexe en interne ; on rétablit les identifiants d'origine.
+    return {
+        "svd_user_factors": np.asarray(algo.pu, dtype=np.float32),
+        "svd_item_factors": np.asarray(algo.qi, dtype=np.float32),
+        "svd_user_bias": np.asarray(algo.bu, dtype=np.float32),
+        "svd_item_bias": np.asarray(algo.bi, dtype=np.float32),
+        "svd_global_mean": float(trainset.global_mean),
+        "svd_item_ids": np.array(
+            [int(trainset.to_raw_iid(i)) for i in range(trainset.n_items)],
+            dtype=np.int64),
+        "svd_user_index": {int(trainset.to_raw_uid(i)): i
+                           for i in range(trainset.n_users)},
+    }
+
+
 def save_artifacts(algo, trainset, out_dir: Path) -> None:
     """Sérialise les facteurs appris pour une inférence numpy-only."""
     n_users = trainset.n_users
     n_items = trainset.n_items
+    facteurs = extract_factors(algo, trainset)
 
-    # Surprise indexe en interne ; on rétablit les identifiants d'origine.
-    user_index = {int(trainset.to_raw_uid(inner)): inner for inner in range(n_users)}
-    item_ids = np.array([int(trainset.to_raw_iid(inner)) for inner in range(n_items)],
-                        dtype=np.int64)
-
-    np.save(out_dir / "svd_user_factors.npy", np.asarray(algo.pu, dtype=np.float32))
-    np.save(out_dir / "svd_item_factors.npy", np.asarray(algo.qi, dtype=np.float32))
-    np.save(out_dir / "svd_user_bias.npy", np.asarray(algo.bu, dtype=np.float32))
-    np.save(out_dir / "svd_item_bias.npy", np.asarray(algo.bi, dtype=np.float32))
+    for nom in ("svd_user_factors", "svd_item_factors", "svd_user_bias",
+                "svd_item_bias", "svd_item_ids"):
+        np.save(out_dir / f"{nom}.npy", facteurs[nom])
     np.save(out_dir / "svd_global_mean.npy",
-            np.array([trainset.global_mean], dtype=np.float32))
-    np.save(out_dir / "svd_item_ids.npy", item_ids)
+            np.array([facteurs["svd_global_mean"]], dtype=np.float32))
     with open(out_dir / "svd_user_index.pkl", "wb") as f:
-        pickle.dump(user_index, f, protocol=pickle.HIGHEST_PROTOCOL)
+        pickle.dump(facteurs["svd_user_index"], f,
+                    protocol=pickle.HIGHEST_PROTOCOL)
 
     total = sum((out_dir / n).stat().st_size for n in (
         "svd_user_factors.npy", "svd_item_factors.npy", "svd_user_bias.npy",

@@ -193,8 +193,8 @@
     \textbf{Définition de la note} & \textbf{HitRate@5} & \textbf{Person.} &
     \textbf{Verdict} \\
     \midrule
-    Étoiles de l'article (log des clics) & 0,0000 & 12 \% &
-      reproduit la popularité \\
+    Étoiles de l'article (log des clics) & 0,0015 & 23 \% &
+      ne classe pas \\
     Binaire + 1 négatif échantillonné   & 0,0080 & 46 \% & insuffisant \\
     Binaire + 4 négatifs échantillonnés & 0,0815\,$^*$ & 34 \% &
       meilleure variante \\
@@ -209,10 +209,10 @@
     \item Les étoiles échouent parce que la note ne dépend que de l'article : le
           biais article capte tout le signal, et le modèle apprend « quels articles
           sont lus », pas « qui lit quoi ».
-    \item $^*$ mesuré sur validation ; sur le test, la même variante s'effondre à
-          \textbf{0,0005} — un facteur 160. Le réglage \pointfort{ne s'est pas
-          reproduit} : c'est précisément ce qu'une période de test intacte sert à
-          révéler.
+    \item Les trois lignes sont mesurées sur la \textbf{validation}. Sur le test,
+          la meilleure variante retombe à \textbf{0,0220} — un facteur 3,7. Le
+          réglage \pointfort{ne s'est pas reproduit}, et c'est ce qu'une période
+          de test intacte sert à révéler.
   \end{itemize}
 \end{frame}
 
@@ -220,10 +220,15 @@
   \framesubtitle{Découpage temporel 60 / 20 / 20}
   \small
   \begin{itemize}
-    \item Première évaluation : modèles entraînés sur 100 \% des données, puis
-          évalués sur ces mêmes données. L'ALS affichait HitRate@5 = 0,2300.
-    \item Avec un découpage temporel correct, il tombe à \textbf{0,0250} —
-          \pointfort{un facteur 42}, invisible sans découpage.
+    \item Première évaluation : ALS entraîné sur 100 \% des clics, puis mesuré en
+          retirant le dernier clic de chaque lecteur — un clic que le modèle avait
+          déjà vu. HitRate@5 = \textbf{0,2415}.
+    \item Avec un découpage temporel correct, il tombe à \textbf{0,0415} —
+          \pointfort{un facteur 5,8} de précision imaginaire, invisible sans
+          découpage.
+    \item La popularité, elle, ne profite pas de la fuite : son classement ne
+          dépend pas du lecteur. Seuls les modèles \emph{personnalisés} peuvent
+          recopier ce qu'ils ont appris d'un lecteur.
     \item Temporel et non aléatoire : sur un flux d'actualité, un découpage
           aléatoire laisse le modèle apprendre des clics \emph{postérieurs} à ceux
           qu'il doit prédire.
@@ -245,14 +250,14 @@
 \end{frame}
 
 \begin{frame}{Résultat principal : la fraîcheur pèse plus que le modèle}
-  \framesubtitle{Même algorithme, deux fenêtres de comptage}
+  \framesubtitle{Le résultat le plus important de l'évaluation}
   \centering
   \includegraphics[width=0.97\textwidth]{figures/fraicheur.pdf}
 
   \vspace{0.3em}
   \raggedright\footnotesize
   \begin{itemize}\itemsep2pt
-    \item \pointfort{Facteur 250} entre la première et la dernière barre, sans
+    \item \pointfort{Facteur 42} entre la première et la dernière barre, sans
           changer une ligne d'algorithme.
     \item Explication : \textbf{48 \%} des articles lus pendant la période évaluée
           n'existaient pas encore pendant l'entraînement.
@@ -282,9 +287,10 @@
   \begin{itemize}\itemsep3pt
     \item La popularité est 12 fois plus précise, mais expose \textbf{11 articles
           sur 364 047} : un éditeur y perd son catalogue.
-    \item C'est le quatrième critère qui a \pointfort{disqualifié le SVD sur
-          étoiles} : personnalisation 12 \%, soit \emph{moins} que la popularité —
-          il la reproduisait en plus grossier.
+    \item Aucun critère ne sauve le \pointfort{SVD sur étoiles} : HitRate nul et
+          personnalisation 12 \%, contre 96 \% pour le contenu. Il ne trouve rien
+          \emph{et} ne distingue presque pas les lecteurs — parce que sa note ne
+          dépend que de l'article.
   \end{itemize}
 \end{frame}
 
@@ -299,8 +305,9 @@
     \item Retenu : \pointfort{4 populaires (1 h) + 1 contenu} — la place donnée au
           contenu ne coûte rien en précision (écart non significatif) et
           \textbf{multiplie la couverture par 38}.
-    \item Une place donnée à l'ALS coûterait 3,7 \% de précision pour neuf fois
-          moins de couverture : il reste disponible, mais n'est pas servi.
+    \item Les deux collaboratifs restent en bas à gauche : un ordre de grandeur
+          moins précis que la popularité \emph{et} vingt fois moins couvrants que
+          le contenu. Disponibles dans l'application, ils ne sont pas servis.
   \end{itemize}
 \end{frame}
 
@@ -325,7 +332,7 @@
   \raggedright\scriptsize
   \begin{itemize}\itemsep1pt
     \item À gauche, le 16/10 et 3 784 à 10 627 lecteurs ; à droite, le 25/09 et un
-          article lu par \textbf{une} personne — \pointfort{le facteur 250, rendu
+          article lu par \textbf{une} personne — \pointfort{le facteur 42, rendu
           visible}.
     \item Cinquième place à gauche : \#284220 du \textbf{17/10}, neuf lecteurs.
           C'est la place du contenu, et la popularité ne la trouverait jamais.
@@ -529,7 +536,7 @@
   \vfill
   {\color{white}\LARGE\bfseries La fraîcheur pèse plus que le modèle}\\[1em]
   {\color{white!75!primary}\small
-   Facteur 250 sur la précision, mesuré sur découpage temporel.\\[0.4em]
+   Facteur 42 sur la précision, mesuré sur la période de test.\\[0.4em]
    Une place sur cinq accordée à la personnalisation ne coûte rien
    et multiplie par 38 la part du catalogue exposée.}
   \vfill
