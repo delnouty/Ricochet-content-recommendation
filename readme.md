@@ -1,10 +1,11 @@
 # Ricochet — article recommendation engine (My Content)
 
-Article recommendation engine: content-based, ALS collaborative and hybrid ranking,
-with an explicit cold-start path. Offline training / numpy-only inference keeps the
-deployed function ML-dependency-free; one core ships to Azure Functions (Blob
-artifacts) and to a self-contained Streamlit Space. Offline eval, unit tests,
-architecture notes.
+Article recommendation engine: popularity, content-based, ALS, SVD and a mixed
+production strategy behind one interface, with an explicit cold-start cascade.
+Offline training / numpy-only inference keeps the deployed function
+ML-dependency-free; one core ships to an Azure Function (Blob artifacts), to a
+Hugging Face Space and to a network-free local app. Temporal-split evaluation,
+59 unit tests, MLOps guard rails, architecture and validation notes.
 
 MVP for the **My Content** start-up: recommend **5 articles** per user, built on the
 public *News Portal User Interactions by Globo.com* dataset (no proprietary data yet).
@@ -12,26 +13,43 @@ public *News Portal User Interactions by Globo.com* dataset (no proprietary data
 ## How it works
 
 ```
-data/raw/  ──[ offline: src/prepare_model.py ]──▶  models/  ──[ online: src/recommender.py ]──▶  top-5
-   clicks + embeddings        PCA 250→50, ALS         lightweight artifacts        numpy only
+data/news-portal-user/     2 988 181 clicks, 364 047 articles, embeddings of 250 dim
+        |
+        |  offline    src/prepare_model.py + src/collaborative_surprise.py
+        |             PCA 250 -> 50, ALS, SVD, sliding freshness windows
+        v
+models/                    22 artifacts, 253 MB
+        |
+        |  online     src/recommender.py -- numpy only
+        |             4 most-read of the last hour + 1 content pick from a 6 h pool
+        v
+top-5 articles             per reader, 0.2 s on the deployed function
 ```
 
-The split is deliberate: everything expensive (PCA, ALS training) runs offline and is
-serialised into artifacts, so the inference path depends on `numpy` + `pickle` only.
-The deployed unit therefore carries no scikit-learn and no `implicit`, which keeps the
-package small enough for the Azure free tier and makes cold starts cheap.
+The split is deliberate: everything expensive (PCA, ALS and SVD training) runs offline
+and is serialised into artifacts, so the inference path depends on `numpy` + `pickle`
+only. The deployed unit carries no scikit-learn, no `implicit` and no `surprise`, which
+keeps the package small and cold starts cheap.
 
-Three ranking strategies sit behind one interface:
+Five ranking strategies sit behind one interface:
 
 | `method` | Ranking signal |
 |---|---|
-| `content` | user profile = mean of the PCA-reduced embeddings of read articles, then cosine over the whole catalogue |
+| `mix` (default — **served in production**) | 4 slots to the most-read articles of the last hour, 1 slot to the content pick; the trade-off measured to be best across precision *and* catalogue coverage |
+| `content` | user profile = mean of the PCA-reduced embeddings of read articles, then cosine over the candidate pool |
 | `collab` | `item_factors · user_factors` from an ALS model trained on implicit feedback |
-| `hybrid` (default) | min-max normalised blend of both (`alpha=0.5`); degrades to content-only when the user is unknown to the CF model |
+| `svd` | Surprise SVD on binary ratings with sampled negatives (the article-rating variant does not rank — see [notebooks/06_exp_svd.ipynb](notebooks/06_exp_svd.ipynb)) |
+| `hybrid` | min-max normalised blend of content and ALS (`alpha=0.5`); degrades to content-only when the reader is unknown to the CF model |
 
-Already-clicked articles are always excluded, and any user without usable history falls
-back to the global popularity ranking — the cold-start baseline the target architecture
-builds on.
+Already-read articles are always excluded. A reader without usable history goes through a
+**four-level fallback cascade** — regional popularity crossed with the freshness window,
+then freshness alone, then region alone, then the full history — so no request ever
+returns an empty list.
+
+Recency turned out to be the strongest lever in the project: counting clicks over one
+hour instead of the whole history multiplies precision by **42** on the test period,
+without changing a line of algorithm. That is why the target architecture keeps the
+*window* fresh rather than chasing a better model.
 
 ## Three independent deployments
 
@@ -84,18 +102,23 @@ articles): [docs/architecture.md](docs/architecture.md).
 
 ```bash
 pip install -r requirements.txt
-# Download the Globo.com dataset into data/raw/ (see data/README.md)
+# Download the Globo.com dataset into data/news-portal-user/ (see data/README.md)
 ```
 
 ### 2. Build the model artifacts
 
 ```bash
-python -m src.prepare_model --data-dir data/raw --out-dir models --pca 50 --factors 50
+python -m src.prepare_model --data-dir data/news-portal-user --out-dir models
+python -m src.collaborative_surprise --data-dir data/news-portal-user --out-dir models
 ```
 
-Produces `articles_embeddings_pca.npy`, `user_clicks.pkl`, `popular_articles.npy` and the
-`cf_*` ALS factors. If `implicit` is not installed the collaborative step is skipped with a
-warning instead of failing — `collab`/`hybrid` then degrade gracefully.
+Together they produce the **22 artifacts** (253 MB): the PCA catalogue and its projection,
+per-reader histories, popularity rankings (global, regional and over the sliding freshness
+windows), article star ratings, and the ALS and SVD factors. Count on about twenty minutes.
+
+If `implicit` is not installed the collaborative step is skipped with a warning instead of
+failing — `collab`/`hybrid` then degrade gracefully. The same holds for every optional
+artifact: a missing one disables its strategy, and the app says so, rather than failing.
 
 It also writes `pca_mean.npy` + `pca_components.npy` (~51 KB): the PCA projection itself,
 without which a **new article** could not be placed in the reduced space without refitting
@@ -173,16 +196,23 @@ Publishing to the Hub and the Space secrets (`HF_MODEL_REPO`, `HF_TOKEN`):
 
 `GET/POST /api/recommend` (auth level `FUNCTION` — a function key is required once deployed)
 
+Parameters are accepted in the query string or in a JSON body.
+
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `user_id` | — (required) | user identifier |
+| `user_id` | — (required) | reader identifier |
 | `n` | 5 | number of articles |
-| `method` | `hybrid` | `content` \| `collab` \| `hybrid` |
+| `method` | `mix` | `mix` \| `content` \| `collab` \| `svd` \| `hybrid` |
+| `region` | — | region code; affects cold start only |
+| `fresh_only` | true | restrict to recent articles; `0`/`false` widens to the whole catalogue |
+| `history` | — | comma-separated article ids — the caller's profile, which lets this **stateless** service serve a reader it has never seen |
+| `code` | — (required) | function key |
 
-Response: `{"user_id": 0, "method": "hybrid", "recommendations": [id1, …, id5]}`
+Response: `{"user_id": 0, "method": "mix", "recommendations": [id1, …, id5]}`
 
-Errors: `400` on a missing/non-integer `user_id` or an unknown `method`, `500` on an
-internal failure. The recommender is instantiated once per worker and reused.
+Errors: `400` on a missing/non-integer parameter or an unknown `method`, `401` on a bad
+key, `500` on an internal failure. The recommender is instantiated once per worker and
+reused; only the freshness window is re-read on every call, through a Blob input binding.
 
 ## Adding new articles (no retraining)
 
@@ -204,7 +234,10 @@ articles; override with `--allow-duplicates`.
 What it deliberately leaves alone: `popular_articles.npy` (an article with no clicks has no
 popularity — it surfaces through content similarity only) and `articles_metadata.csv` (source
 data, not an artifact, so apps show `Article #<id>` until it's updated). Restart the app
-afterwards, and re-publish `models/` to Blob or the HF Hub for those two solutions.
+afterwards. The local solution reads the folder directly; the Azure and Hugging Face
+solutions need `models/` re-published to Blob Storage or the HF Hub — and for Azure,
+**redeploy rather than restart**: a restart does not guarantee every instance drops its
+artifact cache ([docs/deploiement_azure.md](docs/deploiement_azure.md) step 11).
 
 Verified on the real catalogue: three added articles took ids 364047–364049 and entered a
 matching user's top-5 immediately, with no model retrained. Rationale and the scheduled
@@ -212,14 +245,33 @@ PCA refit that bounds this approach: [docs/architecture.md](docs/architecture.md
 
 ## Evaluation
 
-Offline **leave-last-out** protocol (notebook section 4): for every user with enough
-history, the last click is masked and we check whether it appears in the top-N —
-**Hit Rate@5**, equal to Recall@5 here since there is a single relevant item per user.
+**Temporal 60/20/20 split** on the click timestamp: settings are tuned on the validation
+period, the test period is measured once. A random split — or a leave-last-out over the
+full data — lets a model learn from clicks that come *after* the ones it must predict.
+Measured, that inflates ALS precision from 0.0415 to 0.2415, a factor of **5.8**
+(`python scripts/mesure_fuite.py`).
 
-Known limit, stated rather than hidden: the ALS factors are **not** retrained without the
-held-out click, so `collab` and the collaborative half of `hybrid` have seen that item
-during training and score optimistically. The comparison is indicative, not a rigorous
-benchmark.
+Four criteria, because precision alone always elects the least personalised strategy:
+
+| Configuration | HitRate@5 | Coverage | Personalisation |
+|---|---|---|---|
+| popularity, 1 h window | **0.2525** | 0.003 % | 4 % |
+| **mix — 4 popular + 1 content** | **0.2500** | 0.116 % | 22 % |
+| ALS (24 h, 16 factors) | 0.0415 | 0.015 % | 95 % |
+| SVD (binary + 4 negatives) | 0.0220 | 0.010 % | 56 % |
+| content (6 h pool) | 0.0200 | **0.268 %** | **96 %** |
+
+`mix` is served in production: the slot given to content costs 1 % of precision and
+multiplies catalogue coverage by 38.
+
+These values live in [models/baseline_metrics.json](models/baseline_metrics.json) and are
+reproduced by `python -m src.evaluate --split test`. A CI quality gate blocks publication
+when HitRate@5 or Recall@5 falls more than 10 % below that reference.
+
+Limits, stated rather than hidden: **cold start is not measured** (only readers known at
+training time are evaluated), and every number here is offline — the click-through rate on
+real recommendations remains the only true judge. Details and the per-approach experiments:
+[docs/mlops.md](docs/mlops.md), [notebooks/](notebooks/).
 
 ## Tests
 
@@ -230,11 +282,18 @@ pip install -r requirements-dev.txt
 python -m pytest tests/ -q
 ```
 
-Coverage: content-based / collaborative / hybrid ranking, exclusion of already-seen
-articles, popularity fallback on cold start, robustness (invalid method, `n` larger than
-the catalogue), the sync check between the deployed copies of the core, the persisted PCA
+59 tests. Coverage: all five ranking strategies including the composition of `mix`,
+exclusion of already-read articles, the four-level fallback cascade and regional cold
+start, the freshness window (anchor robust to outlier timestamps, automatic widening,
+`fresh_only` toggle), the two SVD rating variants, artifact-cache freshness, robustness
+(invalid method, `n` larger than the catalogue, ids outside the catalogue injected at
+runtime), the sync check between the deployed copies of the core, the persisted PCA
 projection, and new-article integration (id assignment, existing vectors left untouched,
 immediate recommendability).
+
+Several of these tests exist because the corresponding defect **shipped silently first** —
+a service that answers is not a service that is right. See
+[docs/gxp/04_Risk_Assessment.md](docs/gxp/04_Risk_Assessment.md) § 6.
 
 After editing `src/recommender.py`, regenerate the deployed copies:
 
