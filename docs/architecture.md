@@ -47,18 +47,34 @@ Le même cœur de reco (`src/recommender.py`) et les mêmes artefacts alimentent
 Architecture 2 de Julien : *serverless sans API dédiée*, la Function accède
 directement aux modèles dans Blob Storage.
 
+```mermaid
+flowchart TB
+    subgraph blob["Azure Blob Storage — conteneur models, 22 artefacts"]
+        frais["Fraîcheur — 23 Ko<br/>popular_recent.npy<br/>candidates_recent.npy<br/>recent_window.json<br/>— change toutes les heures"]
+        lourds["Artefacts lourds — 253 Mo<br/>catalogue ACP 50 dim, historiques,<br/>étoiles, régions, facteurs ALS et SVD<br/>— change au ré-entraînement"]
+    end
+
+    subgraph fn["Azure Function — unité déployable unique, pas d'API intermédiaire"]
+        http["Déclencheur HTTP /api/recommend<br/>user_id, n, method, region,<br/>fresh_only, history"]
+        moteur["Recommender — numpy seul<br/>mix : 4 populaires 1 h + 1 contenu vivier 6 h<br/>cascade de repli, jamais de liste vide"]
+        http --> moteur
+    end
+
+    tables[("Azure Table Storage<br/>clients inscrits et lectures")]
+    app["Application locale<br/>app/streamlit_app.py"]
+
+    frais -->|"blob input binding<br/>relu à CHAQUE appel, 2 ms"| moteur
+    lourds -->|"SDK + cache<br/>au démarrage à froid, 8 s"| moteur
+    app -->|"user_id, plus history si le lecteur<br/>est inconnu du service"| http
+    moteur -->|"5 article_id"| app
+    app <-->|"inscription et lectures"| tables
 ```
-┌──────────────┐   HTTP GET /recommend?user_id=..   ┌───────────────────────┐
-│  App         │ ─────────────────────────────────▶ │   Azure Function       │
-│ (Streamlit)  │ ◀───────── 5 article_id ────────── │  (Python, serverless)  │
-└──────────────┘                                     │  Recommender (numpy)   │
-                                                     └───────────┬───────────┘
-                          (démarrage à froid : téléchargement 1x) │
-                                                     ┌───────────▼───────────┐
-                                                     │  Azure Blob Storage    │
-                                                     │  artefacts de modèle   │
-                                                     └────────────────────────┘
-```
+
+Deux flèches partent de Blob Storage, et c'est le point de la figure : les 23 Ko
+de fraîcheur et les 253 Mo d'artefacts lourds n'empruntent **pas** le même
+chemin. Un schéma qui les confondrait décrirait l'architecture 2 telle qu'elle
+est suggérée, non telle qu'elle est implémentée — voir la justification mesurée
+juste après.
 
 #### Deux accès à Blob Storage, chacun là où il est le meilleur
 
