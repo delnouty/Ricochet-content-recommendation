@@ -9,7 +9,7 @@ measured choice (`docs/architecture.md` § 3.a).
 ## State of this code
 
 > **Not applied to date.** The existing resources were created by hand
-> (`docs/deploiement_azure.md`, step 5) *before* these files were written. This
+> (`docs/azure_deployment.md`, step 5) *before* these files were written. This
 > configuration describes the same stack — same names, same region, same
 > settings — but it has never been through `plan` or `apply`: Terraform is not
 > installed on the development machine. `terraform validate` does run, in CI.

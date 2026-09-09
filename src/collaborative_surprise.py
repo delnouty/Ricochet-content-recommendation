@@ -208,7 +208,7 @@ def main() -> None:
                         help="borne haute de la note (nombre de clics)")
     # Défauts = la variante retenue par le notebook 06. Ils valaient auparavant
     # « stars » et 0 négatif, c'est-à-dire la variante que l'étude **rejette**
-    # (HitRate@5 nul). La commande documentée dans `docs/deploiement_azure.md`
+    # (HitRate@5 nul). La commande documentée dans `docs/azure_deployment.md`
     # n'ayant aucun drapeau, elle produisait ce modèle-là, et le bouton « SVD
     # Surprise » de l'application le servait.
     parser.add_argument("--negatives", default=4, type=int,

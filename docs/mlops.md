@@ -1,260 +1,263 @@
-# MLOps — traçabilité, versionnage, intégration continue
+# MLOps — traceability, versioning, continuous integration
 
-Ce document décrit comment un résultat de ce dépôt devient reproductible, et comment
-un modèle ré-entraîné est empêché de partir en production s'il dégrade le service.
+This document describes how a result from this repository becomes reproducible,
+and how a re-trained model is prevented from reaching production if it degrades
+the service.
 
-## 1. Pourquoi c'était nécessaire
+## 1. Why this was necessary
 
-Les premières mesures du projet étaient fausses : les modèles étaient entraînés sur
-100 % des données puis évalués sur ces mêmes données. L'ALS affichait un HitRate@5 de
-**0,2415** ; avec un découpage temporel correct, il tombe à **0,0415** — un facteur
-**5,8** de précision imaginaire, qui n'était visible nulle part parce que rien
-n'était tracé. Le chiffre est reproductible : `python scripts/mesure_fuite.py`.
+The project's first measurements were wrong: the models were trained on 100 % of
+the data and then evaluated on that same data. ALS showed a HitRate@5 of
+**0.2415**; with a correct temporal split it drops to **0.0415** — a factor of
+**5.8** of imaginary accuracy, visible nowhere because nothing was traced. The
+figure is reproducible: `python scripts/mesure_fuite.py`.
 
-Trois manques distincts :
+Three distinct gaps:
 
-| Manque | Conséquence |
+| Gap | Consequence |
 |---|---|
-| pas de découpage train / validation / test | métriques gonflées par une fuite |
-| pas d'enregistrement des essais | on retient un chiffre, on perd la configuration |
-| pas de porte de qualité | un ré-entraînement dégradé se publie sans alerte |
+| no train / validation / test split | metrics inflated by leakage |
+| no record of the runs | you keep a number and lose the configuration |
+| no quality gate | a degraded re-training publishes itself without warning |
 
-## 2. Découpage et protocole
+## 2. Split and protocol
 
-Découpage **temporel** 60 / 20 / 20 sur `click_timestamp` (`src/evaluate.py`) — et non
-aléatoire : sur un flux d'actualité, un découpage aléatoire laisse le modèle apprendre
-des clics postérieurs à ceux qu'il doit prédire.
+A **temporal** 60 / 20 / 20 split on `click_timestamp` (`src/evaluate.py`) — not
+a random one: on a news stream, a random split lets the model learn from clicks
+that came after the ones it is supposed to predict.
 
 ```
-| 60 % entraînement | 20 % validation | 20 % test |
-t0 -------------- t60 ------------ t80 --------- tfin
+| 60 % training | 20 % validation | 20 % test |
+t0 ----------- t60 ----------- t80 ------- tend
 ```
 
-Trois règles, établies par les notebooks 03 à 07 :
+Three rules, established by notebooks 03 to 07:
 
-1. **le vivier de candidats est recalculé à l'instant de la requête** — pour évaluer
-   sur le test, l'historique est `entraînement + validation`. Ce n'est pas une fuite :
-   un service en production connaît le passé jusqu'à la minute présente. Un vivier
-   gelé à la fin de l'entraînement donne **0,0000** pour toutes les méthodes ;
-2. **chaque méthode est réglée sur la validation**, et ses réglages sont balayés
-   **ensemble**. Comparer une méthode réglée à des méthodes par défaut fausse la
-   conclusion ; juxtaposer des optima partiels la fausse aussi — l'ALS varie de
-   0,0110 à 0,0345 selon la combinaison fenêtre × facteurs, et la combinaison
-   obtenue en prenant les deux gagnants de balayages séparés est la pire des
-   quatre (notebook 05, section 3) ;
-3. **les deux modèles collaboratifs sont ré-entraînés sur l'historique de la
-   mesure.** L'ALS l'était, le SVD non : il tombait à 0,0005 au lieu de 0,0220,
-   par manque de données et non par faiblesse du modèle.
+1. **the candidate pool is recomputed at request time.** To evaluate on the test
+   period, the history is `training + validation`. This is not leakage: a
+   production service knows the past up to the present minute. A pool frozen at
+   the end of training gives **0.0000** for every method;
+2. **each method is tuned on the validation period**, and its settings are swept
+   **jointly**. Comparing one tuned method against methods left at their
+   defaults distorts the conclusion; so does juxtaposing partial optima — ALS
+   ranges from 0.0110 to 0.0345 depending on the window × factors combination,
+   and the combination obtained by taking the two winners of separate sweeps is
+   the worst of the four (notebook 05, section 3);
+3. **both collaborative models are re-trained on the history used for the
+   measurement.** ALS was, SVD was not: it fell to 0.0005 instead of 0.0220,
+   for want of data rather than any weakness of the model.
 
-Le réglage se fait sur la validation ; le test ne sert qu'à la mesure finale.
+Tuning happens on validation; the test period is only used for the final
+measurement.
 
-## 3. Traçabilité (MLflow)
+## 3. Traceability (MLflow)
 
-`src/tracking.py`. Backend **SQLite** (`mlflow.db`) et non dossier de fichiers :
-MLflow 3 refuse le file store, et le registre de modèles exige une base.
+`src/tracking.py`. A **SQLite** backend (`mlflow.db`) rather than a directory of
+files: MLflow 3 refuses the file store, and the model registry requires a
+database.
 
 ```powershell
 python -m src.evaluate --out-dir models_split --split val --skip-build --track
 mlflow ui --backend-store-uri sqlite:///mlflow.db      # http://127.0.0.1:5000
 ```
 
-Chaque essai enregistre :
+Every run records:
 
-- **paramètres** : fenêtres, facteurs, négatifs, type de note, taille des périodes ;
-- **métriques** : HitRate@5, Recall@5, couverture, personnalisation ;
-- **tags** : `git_commit` — un chiffre est ainsi rattaché à un état exact du code.
+- **parameters**: windows, factors, negatives, rating type, period sizes;
+- **metrics**: HitRate@5, Recall@5, coverage, personalisation;
+- **tags**: `git_commit` — so a number is tied to an exact state of the code.
 
-MLflow est une dépendance **optionnelle** : absent, le traçage est ignoré avec un
-avertissement, et une panne de traçage n'interrompt jamais une évaluation.
+MLflow is an **optional** dependency: if it is absent, tracking is skipped with
+a warning, and a tracking failure never interrupts an evaluation.
 
-## 4. Versionnage des modèles
+## 4. Model versioning
 
-Le « modèle » de ce projet est un dossier d'artefacts `.npy` / `.pkl`, pas un objet
-sérialisé. Il est présenté au registre via un emballage `pyfunc` :
+The "model" in this project is a directory of `.npy` / `.pkl` artifacts, not a
+serialised object. It is presented to the registry through a `pyfunc` wrapper:
 
 ```powershell
 python -m src.evaluate --out-dir models_split --split test --skip-build `
     --register ricochet-artefacts
 ```
 
-Chaque version conserve ses métriques, ses paramètres et son commit, ce qui rend
-possible un retour arrière. L'emballage n'existe que pour la traçabilité : le service
-de production lit les artefacts directement, en numpy seul, et n'importe ni MLflow ni
-scikit-learn ni Surprise.
+Each version keeps its metrics, its parameters and its commit, which makes a
+rollback possible. The wrapper exists only for traceability: the production
+service reads the artifacts directly, in numpy alone, and imports neither
+MLflow, nor scikit-learn, nor Surprise.
 
-## 5. Porte de qualité
+## 5. Quality gate
 
-`scripts/check_metrics.py` — c'est la pièce qui distingue un pipeline MLOps d'un
-entraînement automatisé.
+`scripts/check_metrics.py` — this is the piece that separates an MLOps pipeline
+from an automated training run.
 
 ```powershell
 python -m src.evaluate --out-dir models_split --split test --skip-build --json metrics.json
 python scripts/check_metrics.py --candidate metrics.json --tolerance 0.10
 ```
 
-- compare `HitRate@5` et `Recall@5` à `models/baseline_metrics.json` ;
-- **code de sortie 1** si la baisse dépasse la tolérance → la CI bloque la publication ;
-- les autres métriques sont affichées à titre informatif ;
-- la référence n'est mise à jour que délibérément (`--promote`) et elle est
-  **versionnée dans git** : sans cela, elle suivrait la dérive du modèle et ne
-  protégerait plus rien.
+- compares `HitRate@5` and `Recall@5` against `models/baseline_metrics.json`;
+- **exit code 1** if the drop exceeds the tolerance, so CI blocks the release;
+- the other metrics are printed for information only;
+- the reference is only updated deliberately (`--promote`) and it is **versioned
+  in git**: without that it would follow the model's drift and would no longer
+  protect anything.
 
-Référence actuelle : `popularité 1 h`, HitRate@5 = **0,2525**, Recall@5 = 0,0555
-(période de test, 2 000 lecteurs). Régénérer avec :
+Current reference: `popularity 1 h`, HitRate@5 = **0.2525**, Recall@5 = 0.0555
+(test period, 2 000 readers). To regenerate it:
 
 ```bash
 python -m src.evaluate --split test --skip-build --json models/baseline_metrics.json
 ```
 
-Ne pas la mettre à jour pour faire passer la porte : c'est le geste qui la vide de
-son sens. On la met à jour quand la configuration de référence change, et on dit
-laquelle.
+Do not update it to make the gate pass: that is the gesture that empties it of
+meaning. It is updated when the reference configuration changes, and the change
+is stated.
 
-## 6. Intégration continue
+## 6. Continuous integration
 
-Deux workflows, séparés parce qu'ils n'ont pas les mêmes besoins.
+Two workflows, kept separate because they do not have the same needs.
 
-### `.github/workflows/ci.yml` — à chaque push
+### `.github/workflows/ci.yml` — on every push
 
-Ne demande **aucune donnée** (le jeu Globo pèse 221 Mo et n'est pas versionné) :
+Requires **no data** (the Globo dataset weighs 221 MB and is not versioned):
 
-| Étape | Vérifie |
+| Step | Checks |
 |---|---|
-| `pytest tests/` | le cœur de reco, sur artefacts synthétiques — 78 tests |
-| `sync_recommender.py --check` | les trois copies déployées du cœur sont à jour |
-| taille des fichiers | aucun fichier > 5 Mo versionné |
-| artefacts | aucun `.npy` / `.pkl` / `.db` dans git |
-| `check_secrets.py` | aucun secret en clair, **dans aucun fichier suivi** |
+| `pytest tests/` | the recommendation core, on synthetic artifacts — 87 tests |
+| `sync_recommender.py --check` | the three deployed copies of the core are up to date |
+| file sizes | no versioned file over 5 MB |
+| artifacts | no `.npy` / `.pkl` / `.db` in git |
+| `check_secrets.py` | no secret in clear text, **in any tracked file** |
+| `terraform fmt -check` and `validate` | `infra/` is formatted and internally consistent |
 
-#### La vérification des secrets, et pourquoi elle a été refaite
+#### The secret check, and why it was rewritten
 
-La version précédente ne cherchait que des affectations
-`AZURE_STORAGE_CONNECTION_STRING=` ou `HF_TOKEN=` dans les `.py` et `.ipynb`.
-Elle laissait donc passer trois formes que ce projet manipule réellement :
+The earlier version only looked for `AZURE_STORAGE_CONNECTION_STRING=` or
+`HF_TOKEN=` assignments in `.py` and `.ipynb` files. It therefore let through
+three forms this project actually handles:
 
-- une chaîne de connexion collée telle quelle (`DefaultEndpointsProtocol=…`) ;
-- une **clé de fonction dans une URL** (`?code=…`) — la forme sous laquelle
-  cette clé circule dans toutes les commandes de déploiement ;
-- n'importe laquelle des deux dans un fichier `.md`, alors que les commandes de
-  déploiement vivent dans la documentation.
+- a connection string pasted as it is (`DefaultEndpointsProtocol=…`);
+- a **function key inside a URL** (`?code=…`) — the form in which that key
+  travels through every deployment command;
+- either of those in a `.md` file, when the deployment commands live in the
+  documentation.
 
-`scripts/check_secrets.py` couvre les chaînes de connexion et clés Azure, les
-signatures SAS, les clés de fonction en URL, les jetons Hugging Face et GitHub,
-les identifiants AWS et les clés privées. Il **masque** ce qu'il trouve : un
-journal de build est public, et recopier une fuite en entier pour la signaler la
-rendrait pire.
+`scripts/check_secrets.py` covers Azure connection strings and keys, SAS
+signatures, function keys in URLs, Hugging Face and GitHub tokens, AWS
+credentials and private keys. It **masks** whatever it finds: a build log is
+public, and copying a leak out in full in order to report it would make matters
+worse.
 
-Deux partis pris assumés : pas de détection par entropie (les sorties d'images
-des notebooks sont du base64 et déclencheraient à chaque exécution ; une alarme
-permanente est une alarme ignorée), et des gabarits explicitement tolérés
-(`$key`, `<CLE>`, `hf_...`) pour que la documentation reste écrivable.
-`tests/test_check_secrets.py` fixe les deux côtés — 19 cas, dont un qui vérifie
-que le dépôt réel est propre.
+Two deliberate positions: no entropy-based detection (notebook image outputs are
+base64 and would fire on every run, and a permanent alarm is an ignored alarm),
+and explicitly tolerated placeholders (`$key`, `<KEY>`, `hf_...`) so that the
+documentation stays writable. `tests/test_check_secrets.py` pins both sides —
+28 cases, one of which checks that the real repository is clean.
 
-**Avant de rendre le dépôt public**, l'état courant ne suffit pas : un secret
-retiré reste lisible dans l'historique. Balayer tous les commits :
+**Before making the repository public**, the current state is not enough: a
+removed secret is still readable in the history. Sweep every commit:
 
 ```bash
 python scripts/check_secrets.py --history
 ```
 
-#### Le hook `pre-push` — le dernier moment où c'est encore réversible
+#### The `pre-push` hook — the last moment it is still reversible
 
-La CI s'exécute **après** le push : à ce moment le secret est déjà chez
-l'hébergeur, et l'effacer demande de réécrire un historique publié. Le hook,
-lui, refuse le push.
+CI runs **after** the push: by then the secret is already at the host, and
+erasing it means rewriting a published history. The hook, on the other hand,
+refuses the push.
 
-Le choix du `pre-push` plutôt que du `pre-commit` est délibéré : un commit local
-se corrige sans conséquence (`amend`, `rebase`, `reset`), et bloquer chaque
-commit de travail intermédiaire coûte plus qu'il ne protège. Le push est le
-moment où le contenu devient public et où l'historique cesse d'être à soi.
+Choosing `pre-push` over `pre-commit` is deliberate: a local commit can be fixed
+without consequence (`amend`, `rebase`, `reset`), and blocking every intermediate
+work commit costs more than it protects. The push is the moment the content
+becomes public and the history stops being yours alone.
 
-Une commande, une fois par clone :
+One command, once per clone:
 
 ```bash
 git config core.hooksPath scripts/hooks
 ```
 
-`scripts/hooks/pre-push` est **versionné** — contrairement à `.git/hooks/`, qui
-ne suit pas le dépôt. Pointer `core.hooksPath` dessus le garde à jour sans
-recopie.
+`scripts/hooks/pre-push` is **versioned** — unlike `.git/hooks/`, which does not
+follow the repository. Pointing `core.hooksPath` at it keeps it current without
+any copying.
 
-Il fait deux choses, dans cet ordre :
+It does two things, in this order:
 
-| Contrôle | Portée | Pourquoi cette portée |
+| Check | Scope | Why that scope |
 |---|---|---|
-| secrets | `--range <sha distant>..<sha local>` | seuls les commits qui partent. Tout l'historique serait long à chaque push ; l'index ne dirait rien des commits déjà faits |
-| tests unitaires | `pytest tests/` | aucune donnée requise, quelques secondes |
+| secrets | `--range <remote sha>..<local sha>` | only the commits being pushed. The whole history would be slow on every push, and the index would say nothing about commits already made |
+| unit tests | `pytest tests/` | no data required, a few seconds |
 
-Git fournit les références poussées sur l'entrée standard, une ligne par
-référence — le hook les lit toutes, et traite le cas d'une branche nouvelle en
-face (`sha` distant à zéro) en comparant à ce que le distant connaît déjà.
+Git supplies the pushed references on standard input, one line per reference —
+the hook reads all of them, and handles a branch that is new on the remote (a
+remote `sha` of zeroes) by comparing against what the remote already knows.
 
-En cas de secret, l'arrêt est immédiat : les tests ne tournent pas, et le
-message rappelle que le commit existe déjà en local, donc qu'il faut révoquer la
-valeur puis réécrire l'historique **local**. Faux positif :
+If a secret is found the stop is immediate: the tests do not run, and the message
+is a reminder that the commit already exists locally, so the value has to be
+revoked and the **local** history rewritten. For a false positive:
 `git push --no-verify`.
 
-Le hook cherche l'interpréteur lui-même en préférant celui du projet (c'est lui
-qui a `pytest`, et l'environnement virtuel n'est pas actif dans un hook). S'il
-n'en trouve aucun, il laisse passer **en le disant** plutôt que de bloquer le
-travail — la CI refera les contrôles.
+The hook looks for the interpreter itself, preferring the project's own — that is
+the one with `pytest`, and the virtual environment is not active inside a hook.
+If it finds none, it lets the push through **while saying so**, rather than
+blocking the work: CI will redo the checks.
 
-Deux détails sans lesquels le hook ne servirait à rien :
+Two details without which the hook would be useless:
 
-- `.gitattributes` force **LF** sur `scripts/hooks/*`. Avec
-  `core.autocrlf=true` (défaut sous Windows), le script serait extrait en CRLF,
-  l'interpréteur lirait `#!/bin/sh\r` et le hook ne s'exécuterait pas — *sans
-  erreur au moment du push*, donc sans que personne remarque sa disparition.
-- Le bit exécutable est enregistré dans l'index (mode `100755`), pour que le
-  hook fonctionne aussi sur un clone Linux ou macOS.
+- `.gitattributes` forces **LF** on `scripts/hooks/*`. With `core.autocrlf=true`
+  (the default on Windows) the script would be checked out with CRLF, the
+  interpreter would read `#!/bin/sh\r`, and the hook would not run — *with no
+  error at push time*, so nobody would notice it had disappeared.
+- The executable bit is recorded in the index (mode `100755`), so the hook also
+  works on a Linux or macOS clone.
 
-Les trois issues ont été vérifiées : plage propre (les tests tournent, tout est
-vert), secret dans la plage poussée (refus, tests non exécutés), test en échec
-(refus).
+All three outcomes were verified: a clean range (the tests run, everything
+green), a secret inside the pushed range (refused, tests not run), and a failing
+test (refused).
 
-#### Constats acceptés (`.secretsignore`)
+#### Accepted findings (`.secretsignore`)
 
-Un commit antérieur a versionné les appâts de `tests/test_check_secrets.py`
-écrits en clair. Ils sont depuis assemblés à l'exécution, mais l'historique git
-reste lisible : `--history` les retrouvera toujours. Sans liste d'acceptation,
-la vérification d'avant-publication serait **définitivement rouge**, et une
-vraie fuite se perdrait dans quatre constats connus.
+An earlier commit versioned the decoys of `tests/test_check_secrets.py` written
+in clear text. They are assembled at runtime now, but the git history is still
+readable: `--history` will always find them. Without an acceptance list, the
+pre-publication check would be **permanently red**, and a real leak would be lost
+among four known findings.
 
-`.secretsignore` liste donc ces constats par **empreinte** (SHA-256 tronqué de
-la valeur, jamais la valeur) avec leur justification. Trois propriétés
-délibérées :
+`.secretsignore` therefore lists those findings by **fingerprint** (a truncated
+SHA-256 of the value, never the value) together with a justification. Three
+deliberate properties:
 
-- le fichier est versionnable sans rien publier ;
-- l'empreinte porte sur la valeur exacte : accepter un appât n'accepte pas un
-  secret voisin — c'est testé ;
-- le nombre de constats écartés est **affiché à chaque exécution**, pour que la
-  liste ne grossisse pas en silence.
+- the file can be versioned without publishing anything;
+- the fingerprint covers the exact value, so accepting a decoy does not accept a
+  neighbouring secret — that is tested;
+- the number of dismissed findings is **printed on every run**, so the list
+  cannot grow in silence.
 
-Le balayage de l'historique lit tous les objets en un seul `git cat-file
---batch` : 350 versions de fichiers en 0,6 s. Une première version lançait trois
-processus git par version de fichier et prenait plusieurs minutes — assez pour
-décourager de l'exécuter au moment où elle compte.
+The history sweep reads every object in a single `git cat-file --batch`: 350 file
+versions in 0.6 s. A first version spawned three git processes per file version
+and took several minutes — enough to discourage running it at the moment it
+matters.
 
-### `.github/workflows/train.yml` — manuel
+### `.github/workflows/train.yml` — manual
 
 ```
-données -> artefacts -> évaluation (MLflow) -> PORTE -> publication Blob / HF Hub
+data -> artifacts -> evaluation (MLflow) -> GATE -> publish to Blob / HF Hub
 ```
 
-La publication est conditionnée à la porte. L'étape de récupération des données est à
-compléter selon l'hébergement (runner auto-hébergé, ou téléchargement depuis un
-stockage) : le workflow échoue volontairement plutôt que d'entraîner sur des données
-absentes.
+Publication is conditional on the gate. The data-retrieval step is left to be
+completed according to the hosting (a self-hosted runner, or a download from a
+storage account): the workflow fails on purpose rather than train on data that
+is not there.
 
-## 7. Ce qui reste à faire
+## 7. What is still missing
 
-- **récupération des données dans la CI** — bloque le ré-entraînement automatique ;
-- **recalcul continu de la fenêtre** : `popular_recent.npy` est aujourd'hui produit
-  par le traitement hors-ligne, alors que la fenêtre d'une heure fait un facteur
-  **42** sur la précision par rapport à tout l'historique
-  (`models/freshness_sweep.json`) ;
-- **serveur MLflow partagé** plutôt qu'un fichier SQLite local, dès qu'une deuxième
-  personne lance des expériences ;
-- **surveillance en production** : les métriques mesurées ici sont hors-ligne. Le CTR
-  réel sur les recommandations reste le seul juge.
+- **data retrieval in CI** — it blocks automatic re-training;
+- **continuous recomputation of the window**: `popular_recent.npy` is produced
+  today by the offline job, whereas the one-hour window is worth a factor of
+  **42** in accuracy compared with the whole history
+  (`models/freshness_sweep.json`);
+- **a shared MLflow server** rather than a local SQLite file, as soon as a second
+  person starts running experiments;
+- **production monitoring**: the metrics measured here are offline. The real
+  click-through rate on the recommendations remains the only judge.

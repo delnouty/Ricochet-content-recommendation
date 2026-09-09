@@ -1,60 +1,60 @@
-# Rapport de Synthèse de Validation (VSR)
+# Validation Summary Report (VSR)
 
-| Champ | Valeur |
+| Field | Value |
 |-------|--------|
-| ID document | MC-VSR-001 |
+| Document ID | MC-VSR-001 |
 | Version | 0.1 |
-| Statut | DRAFT — à finaliser après exécution IQ/OQ/PQ |
-| Système | My Content — système de recommandation d'articles |
-| Date d'émission | 2026-07-20 |
+| Status | DRAFT — to be finalised after IQ/OQ/PQ execution |
+| System | Ricochet — article recommendation system |
+| Issue date | 2026-07-20 |
 
-> **Support assistif — à réviser et approuver par l'AQ/CSV. À compléter avec les
-> résultats réels après exécution des protocoles.**
+> **Assistive supporting material — to be reviewed and approved by QA/CSV. To be
+> completed with the real results once the protocols have been executed.**
 
-## 1. Objet
+## 1. Purpose
 
-Synthétiser les activités de validation menées selon le Plan de Validation
-(MC-VAL-001) et statuer sur l'aptitude du système à l'usage prévu.
+To summarise the validation activities carried out under the Validation Plan
+(MC-VAL-001) and to rule on the system's fitness for its intended use.
 
-## 2. Documents de référence
+## 2. Reference documents
 
 VP (MC-VAL-001), URS (MC-URS-001), FS (MC-FS-001), RA (MC-RA-001),
 RTM (MC-RTM-001), IQ (MC-IQ-001), OQ (MC-OQ-001), PQ (MC-PQ-001).
 
-## 3. Synthèse des résultats *(à compléter)*
+## 3. Summary of results *(to be completed)*
 
-| Phase | Cas prévus | Cas PASS | Cas FAIL | Écarts ouverts |
+| Phase | Cases planned | PASS | FAIL | Open deviations |
 |-------|-----------|----------|----------|----------------|
 | IQ | 9 | | | |
-| OQ | 10 | | | |
-| PQ | 5 | | | |
+| OQ | 17 | | | |
+| PQ | 7 | | | |
 
-> Note : à la date d'émission, la suite de tests unitaires servant de preuve OQ
-> passe intégralement (**14/14**) sur artefacts synthétiques. L'exécution OQ/PQ
-> sur **données réelles** et environnement de production reste à réaliser.
+> Note: at the date of issue, the unit test suite serving as OQ evidence passes
+> in full (**87/87**) on synthetic artifacts. Executing the OQ and PQ on **real
+> data** and in the production environment remains to be done.
 
-## 4. Synthèse des écarts
+## 4. Summary of deviations
 
-| ID écart | Phase | Description | Criticité | Statut | Impact sur la conclusion |
+| Deviation ID | Phase | Description | Criticality | Status | Impact on the conclusion |
 |----------|-------|-------------|-----------|--------|--------------------------|
 | | | | | | |
 
-## 5. Évaluation des risques résiduels
+## 5. Assessment of residual risks
 
-Rappel : impact GxP **faible** (aucune donnée réglementée). Risques résiduels
-principaux d'ordre qualité de service : dérive du modèle (R-09) et diversité
-(R-10), traités par le suivi en exploitation. À confirmer par l'AQ.
+A reminder: the GxP impact is **low** (no regulated data). The main residual
+risks are matters of service quality: model drift (R-09) and diversity (R-10),
+both addressed by monitoring in operation. To be confirmed by QA.
 
-## 6. Conclusion *(à statuer)*
+## 6. Conclusion *(to be ruled on)*
 
-Sur la base des résultats IQ/OQ/PQ et de la clôture des écarts, le système
-My Content est **déclaré / non déclaré** apte à l'usage prévu (recommandation de
-5 articles), dans les limites du périmètre validé.
+On the basis of the IQ/OQ/PQ results and the closure of deviations, the Ricochet
+system is **declared / not declared** fit for its intended use (recommending
+5 articles), within the limits of the validated scope.
 
-## 7. Approbation finale
+## 7. Final approval
 
-| Rôle | Nom | Signature | Date |
+| Role | Name | Signature | Date |
 |------|-----|-----------|------|
-| Propriétaire système (CTO) | | | |
-| Propriétaire métier (CEO) | | | |
-| Responsable Qualité / AQ | | | |
+| System owner (CTO) | | | |
+| Business owner (CEO) | | | |
+| Head of Quality / QA | | | |

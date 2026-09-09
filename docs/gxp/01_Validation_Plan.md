@@ -1,98 +1,102 @@
-# Plan de Validation (VP)
+# Validation Plan (VP)
 
-| Champ | Valeur |
+| Field | Value |
 |-------|--------|
-| ID document | MC-VAL-001 |
+| Document ID | MC-VAL-001 |
 | Version | 0.2 |
-| Statut | DRAFT — pour revue AQ |
-| Système | My Content — système de recommandation d'articles |
-| Date d'émission | 2026-07-20 |
-| Auteur | Équipe technique (CTO) |
+| Status | DRAFT — for QA review |
+| System | Ricochet — article recommendation system |
+| Issue date | 2026-07-20 |
+| Author | Technical team (CTO) |
 
-> **Support assistif — à réviser et approuver par l'AQ/CSV avant usage.**
+> **Assistive supporting material — to be reviewed and approved by QA/CSV before
+> use.**
 
-## Tableau d'approbation
+## Approval table
 
-| Rôle | Nom | Signature | Date |
+| Role | Name | Signature | Date |
 |------|-----|-----------|------|
-| Auteur (Propriétaire système) | | | |
-| Revue technique | | | |
-| Revue Qualité / AQ | | | |
-| Approbation | | | |
+| Author (system owner) | | | |
+| Technical review | | | |
+| Quality / QA review | | | |
+| Approval | | | |
 
-## 1. Objet
+## 1. Purpose
 
-Définir la stratégie, le périmètre, les responsabilités et les livrables de la
-validation du logiciel My Content, selon une approche GAMP 5 basée sur le risque.
+To define the strategy, scope, responsibilities and deliverables for validating
+the Ricochet software, following a risk-based GAMP 5 approach.
 
-## 2. Périmètre
+## 2. Scope
 
-**Inclus** : moteur de recommandation (`src/recommender.py`), pipeline de
-préparation des artefacts (`src/prepare_model.py`), solution Azure
-(`azure_function/`, `app/`), solution Hugging Face (`spaces/`), artefacts de
-modèle et leur gestion.
+**In scope**: the recommendation engine (`src/recommender.py`), the artifact
+preparation pipeline (`src/prepare_model.py`), the Azure solution
+(`azure_function/`, `app/`), the Hugging Face solution (`spaces/`), and the model
+artifacts and their management.
 
-**Exclu** : infrastructures gérées (services Azure, Hugging Face, dépôts Git),
-couvertes par les accords de service des fournisseurs (catégorie GAMP 1) ;
-constitution du jeu de données source (Globo.com), traité comme donnée d'entrée.
+**Out of scope**: managed infrastructure (Azure services, Hugging Face, Git
+hosting), covered by the suppliers' service agreements (GAMP category 1); and the
+construction of the source dataset (Globo.com), treated as input data.
 
-## 3. Description du système
+## 3. System description
 
-Système de recommandation restituant une sélection d'articles (par défaut 5) pour
-un identifiant de lecteur, à partir de **cinq stratégies** : contenu,
-collaboratif ALS, collaboratif SVD, hybride, et la stratégie **mixte servie en
-production** (quatre places de popularité récente et une place de contenu). Un
-lecteur sans profil exploitable est traité par une **cascade de repli** allant de
-la popularité de sa région croisée avec la fenêtre de fraîcheur jusqu'à la
-popularité sur tout l'historique.
+A recommendation system returning a selection of articles (5 by default) for a
+reader identifier, from **five strategies**: content, collaborative ALS,
+collaborative SVD, hybrid, and the **mixed strategy served in production** (four
+recent-popularity slots and one content slot). A reader with no usable profile is
+handled by a **fallback cascade**, running from the popularity of their region
+crossed with the freshness window down to popularity over the whole history.
 
-Déployé selon **trois solutions indépendantes** : serverless Azure Functions,
-Space Hugging Face (SDK Docker), et exécution locale sans réseau.
+Deployed as **three independent solutions**: serverless Azure Functions, a
+Hugging Face Space (Docker SDK), and local execution with no network.
 
-Voir `docs/architecture.md` (vue statique) et `docs/sequences.md` (diagrammes de
-séquence des trois solutions).
+See `docs/architecture.md` (static view) and `docs/sequences.md` (sequence
+diagrams of the three solutions).
 
-## 4. Approche de validation (basée sur le risque)
+## 4. Validation approach (risk-based)
 
-- Classification GAMP (cf. index) : cœur applicatif en catégorie 5.
-- Effort de validation modulé par l'**analyse de risque** (MC-RA-001).
-- Cycle en V : URS → FS → conception/code → IQ → OQ → PQ.
-- Réutilisation des **tests unitaires automatisés** (`tests/`) comme preuves de
-  vérification (leveraging supplier/developer testing).
+- GAMP classification (see the index): the application core is category 5.
+- Validation effort modulated by the **risk assessment** (MC-RA-001).
+- V-model: URS → FS → design/code → IQ → OQ → PQ.
+- Reuse of the **automated unit tests** (`tests/`) as verification evidence
+  (leveraging supplier/developer testing).
 
-## 5. Livrables de validation
+## 5. Validation deliverables
 
-VP, URS, FS, RA, RTM, protocoles IQ/OQ/PQ, VSR (cf. index MC-VAL).
+VP, URS, FS, RA, RTM, the IQ/OQ/PQ protocols, and the VSR (see the MC-VAL
+index).
 
-## 6. Rôles et responsabilités
+## 6. Roles and responsibilities
 
-| Rôle | Responsabilité |
+| Role | Responsibility |
 |------|----------------|
-| Propriétaire système / CTO | Pilotage, exactitude technique, exécution des tests |
-| Développement | Réalisation, tests unitaires, gestion de configuration |
-| AQ / CSV | Revue, approbation, conformité méthodologique |
-| Propriétaire métier (CEO) | Validation des exigences utilisateur |
+| System owner / CTO | Steering, technical accuracy, test execution |
+| Development | Implementation, unit tests, configuration management |
+| QA / CSV | Review, approval, methodological compliance |
+| Business owner (CEO) | Approval of the user requirements |
 
-## 7. Gestion de configuration et du changement
+## 7. Configuration and change management
 
-- Code versionné (Git + GitHub) ; artefacts de modèle versionnés (Blob / HF Hub).
-- Cœur de reco maintenu en source unique (`src/`) et synchronisé vers les copies
-  déployées via `scripts/sync_recommender.py` (contrôle `--check`).
-- Tout changement significatif → évaluation d'impact et re-validation ciblée.
+- Code under version control (Git + GitHub); model artifacts versioned (Blob /
+  HF Hub).
+- The recommendation core is kept as a single source (`src/`) and synchronised to
+  the deployed copies by `scripts/sync_recommender.py` (checked with `--check`).
+- Any significant change triggers an impact assessment and targeted
+  re-validation.
 
-## 8. Critères d'acceptation
+## 8. Acceptance criteria
 
-La validation est prononcée si : tous les cas OQ/PQ critiques sont **PASS**,
-les écarts sont documentés et clôturés (ou justifiés), la RTM démontre une
-couverture complète URS → tests. Formalisé dans le VSR (MC-VSR-001).
+Validation is declared if: every critical OQ/PQ case is **PASS**, deviations are
+documented and closed (or justified), and the RTM demonstrates complete URS →
+test coverage. Formalised in the VSR (MC-VSR-001).
 
-## 9. Gestion des écarts
+## 9. Deviation management
 
-Tout résultat non conforme est enregistré comme écart (description, criticité,
-analyse de cause, action corrective, statut) et statué avant émission du VSR.
+Any non-conforming result is recorded as a deviation (description, criticality,
+root-cause analysis, corrective action, status) and ruled on before the VSR is
+issued.
 
-## 10. Maintien de l'état validé
+## 10. Maintaining the validated state
 
-Revue périodique, gestion des incidents, réévaluation lors des changements
-(nouveau modèle, nouvelle version de dépendance), et pour l'IA/ML : suivi de la
-**dérive du modèle** et re-entraînement contrôlé (cf. MC-RA-001).
+Periodic review, incident management, re-assessment on change (a new model, a
+new dependency version), and for AI/ML specifically: monitoring of **model
+drift** and controlled re-training (see MC-RA-001).

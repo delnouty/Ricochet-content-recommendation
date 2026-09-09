@@ -1,138 +1,139 @@
-# Spécification Fonctionnelle (FS)
+# Functional Specification (FS)
 
-| Champ | Valeur |
+| Field | Value |
 |-------|--------|
-| ID document | MC-FS-001 |
+| Document ID | MC-FS-001 |
 | Version | 0.2 |
-| Statut | DRAFT — pour revue AQ |
-| Système | My Content — système de recommandation d'articles |
-| Date d'émission | 2026-09-08 |
-| Remplace | Version 0.1 du 2026-07-20 |
+| Status | DRAFT — for QA review |
+| System | Ricochet — article recommendation system |
+| Issue date | 2026-09-08 |
+| Supersedes | Version 0.1 of 2026-07-20 |
 
-> **Support assistif — à réviser et approuver par l'AQ/CSV avant usage.**
+> **Assistive supporting material — to be reviewed and approved by QA/CSV before
+> use.**
 
-## Tableau d'approbation
+## Approval table
 
-| Rôle | Nom | Signature | Date |
+| Role | Name | Signature | Date |
 |------|-----|-----------|------|
-| Auteur (technique) | | | |
-| Revue Qualité / AQ | | | |
+| Author (technical) | | | |
+| Quality / QA review | | | |
 
-## 1. Architecture logicielle (rappel)
+## 1. Software architecture (recap)
 
-Un cœur de recommandation unique, `Recommender` (`src/recommender.py`, **numpy
-seul** à l'inférence), alimenté par des artefacts pré-calculés hors-ligne et
-exposé par **trois solutions de déploiement indépendantes**. Les copies déployées
-du cœur sont **générées** depuis `src/`, jamais éditées à la main.
+A single recommendation core, `Recommender` (`src/recommender.py`, **numpy only**
+at inference time), fed by artifacts pre-computed offline and exposed by **three
+independent deployments**. The deployed copies of the core are **generated** from
+`src/` and never hand-edited.
 
-Aucune bibliothèque d'apprentissage n'est requise à l'inférence : scikit-learn
-(ACP), `implicit` (ALS) et `surprise` (SVD) ne servent qu'à la production des
-artefacts.
+No machine-learning library is required at inference time: scikit-learn (PCA),
+`implicit` (ALS) and `surprise` (SVD) serve only to produce the artifacts.
 
-Références : `docs/architecture.md` (statique), `docs/sequences.md` (dynamique —
-diagrammes de séquence des trois solutions).
+References: `docs/architecture.md` (static), `docs/sequences.md` (dynamic — the
+sequence diagrams of the three solutions).
 
-## 2. Spécifications fonctionnelles
+## 2. Functional specifications
 
-| ID | Couvre (URS) | Spécification |
+| ID | Covers (URS) | Specification |
 |----|--------------|---------------|
-| FS-001 | URS-001, URS-002 | `Recommender.recommend(user_id, n=5, method)` renvoie une liste d'au plus `n` `article_id`, jamais plus, et jamais de doublon. `n` est exposé par l'API et l'interface, défaut **5**, plage 1–10 dans l'interface. |
-| FS-002 | URS-003 | Méthode `content` : profil = moyenne des embeddings (réduits par ACP) des articles lus ; score = similarité cosinus au catalogue ; tri décroissant. |
-| FS-003 | URS-004 | Méthode `collab` : score = produit des facteurs latents lecteur × article (ALS pré-entraîné, artefacts `cf_*`). |
-| FS-004 | URS-005 | Le paramètre `method` sélectionne la stratégie parmi **`mix`, `content`, `collab`, `svd`, `hybrid`**. Valeur par défaut : **`mix`** (stratégie servie en production, cf. FS-017). `hybrid` combine contenu et collaboratif par normalisation min-max. Toute autre valeur est refusée (cf. FS-015). |
-| FS-005 | URS-006, URS-019 | **Cascade de repli** pour un lecteur sans profil exploitable, dans cet ordre : (1) popularité de sa région croisée avec la fenêtre de fraîcheur, (2) fenêtre de fraîcheur seule, (3) popularité de sa région seule, (4) popularité sur tout l'historique. Une liste partielle est complétée par le niveau suivant. **Aucune requête ne renvoie de liste vide.** |
-| FS-006 | URS-007 | Les `article_id` présents dans l'historique du lecteur sont exclus de tous les résultats (score forcé à `-inf`, puis filtrage des scores non finis). L'exclusion s'applique à toutes les stratégies, y compris aux places de popularité de `mix`. |
-| FS-007 | URS-008 | La projection ACP (`pca_mean.npy`, `pca_components.npy`) est **sérialisée avec le catalogue**. Un nouvel article disposant d'un embedding est projeté et ajouté au catalogue, et devient recommandable par la voie contenu **sans ré-ajustement de l'ACP** et sans ré-entraînement. |
-| FS-008 | URS-009, URS-018 | Interface Streamlit à trois onglets : **Recommandations** (choix du lecteur, de la stratégie, du nombre d'articles, case de fraîcheur, marquage « Lu »), **Parcourir les articles** (catalogue complet, quatre tris, filtre par note, masquage des articles lus), **Nouveau client** (inscription). Chaque ligne affiche identifiant, note en étoiles, nombre de lecteurs, catégorie, longueur et date. |
-| FS-009 | URS-010 | Trois solutions indépendantes : **Azure** — `azure_function/function_app.py`, `GET/POST /api/recommend`, artefacts lus dans Blob Storage ; **Hugging Face** — `spaces/app.py`, Space **SDK Docker**, `Recommender` embarqué, artefacts chargés depuis un dépôt de modèle HF Hub ; **locale** — `local/app.py`, artefacts sur disque, **aucun accès réseau**. |
-| FS-010 | URS-011 | Les artefacts sont chargés **une seule fois** par instance (variable globale `_recommender` côté Azure, `st.cache_resource` côté interfaces) puis réutilisés. L'inférence est vectorielle (numpy). |
-| FS-011 | URS-012, URS-013 | `src/prepare_model.py` produit des artefacts nommés et déterministes (`random_state=42` pour l'ACP et l'ALS) ; `src/collaborative_surprise.py` produit les artefacts SVD. Les 22 artefacts sont publiés vers Blob Storage et HF Hub. |
-| FS-012 | URS-014 | Dépôt Git ; `.gitignore` exclut données brutes, artefacts volumineux et secrets. Les deux relevés de mesure (`models/baseline_metrics.json`, `models/freshness_sweep.json`) sont **explicitement versionnés** : ils servent de référence. |
-| FS-013 | URS-015 | **Protocole d'évaluation** : découpage **temporel 60 / 20 / 20** sur l'horodatage des clics. Les réglages sont choisis sur la validation, la période de test ne sert qu'à la mesure finale. Quatre métriques sont produites : HitRate@5, Recall@5, couverture du catalogue, personnalisation. Le vivier de candidats et les modèles collaboratifs sont recalculés à partir de **tout ce qui précède** la période évaluée. Commande : `python -m src.evaluate --split test`. |
-| FS-014 | URS-016 | Ré-entraînement reproductible par `prepare_model.py` / `collaborative_surprise.py`. Chaque essai est enregistré dans **MLflow** (paramètres, métriques, commit git) et les artefacts sont versionnés dans le registre de modèles, permettant un retour arrière. |
-| FS-015 | URS-001 | Validation des entrées : `user_id` et `n` entiers ; `region` entier ou absent ; `history` liste d'entiers séparés par des virgules ; `method` appartenant à l'ensemble de FS-004. Toute entrée invalide produit une erreur explicite (`ValueError` en interne, **HTTP 400** via l'API) sans interruption du service. |
-| FS-016 | URS-017 | Les entrées et sorties sont des **identifiants numériques anonymes**. Aucune donnée personnelle ni sensible n'est traitée ni stockée. Le nom saisi à l'inscription est une étiquette d'affichage, et l'interface avertit de ne pas y saisir de donnée personnelle. |
-| **FS-017** | URS-019 | **Stratégie servie en production (`mix`)** : sur cinq places, **quatre** sont attribuées aux articles les plus lus de la **fenêtre d'une heure**, et **une** à la voie contenu choisie dans le **vivier de six heures**. Justification mesurée : la place accordée au contenu ne coûte pas de justesse significative et multiplie par 38 la part de catalogue exposée. |
-| **FS-018** | URS-019 | **Artefacts de fraîcheur**, produits par `prepare_model` : `popular_recent.npy` (classement par popularité sur la fenêtre de classement), `candidates_recent.npy` (vivier de candidats sur la fenêtre plus large), `recent_window.json` (métadonnées de la fenêtre : durées demandée et effective, bornes, effectifs). L'ancre temporelle est le **quantile 0,999** des horodatages, afin qu'un horodatage aberrant ne déplace pas la fenêtre. Si la fenêtre contient moins de `min_articles` articles, elle est **élargie automatiquement** et la durée effective est reportée dans les métadonnées. |
-| **FS-019** | URS-019 | Le paramètre **`fresh_only`** (défaut **vrai**) restreint toutes les stratégies au vivier récent. Sa désactivation élargit au catalogue entier ; elle est exposée dans l'interface et l'API à des fins de comparaison, et n'est pas la configuration de production. |
-| **FS-020** | URS-018 | **Inscription d'un lecteur** : nom obligatoire et unique, **région optionnelle**, profil initial optionnel (articles déjà lus). Les identifiants sont attribués séquentiellement à partir de **1 000 000**, ce qui les distingue sans ambiguïté des lecteurs du jeu de données. Un nom vide ou déjà utilisé est refusé avec un message explicite. Le lecteur inscrit reçoit des recommandations **immédiatement**. |
-| **FS-021** | URS-018 | Le paramètre **`history`** de l'API transmet le profil du lecteur dans la requête. Il est **prioritaire** sur les artefacts et permet à un service **sans état** de recommander un lecteur qu'il ne connaît pas. La surcharge est locale à la requête et ne modifie pas l'état partagé du moteur. |
-| **FS-022** | URS-022 | **Magasin de clients** : SQLite pour la solution locale ; **Azure Table Storage** dès qu'une chaîne de connexion est disponible (déploiement partagé ou éphémère), avec repli sur SQLite en cas d'indisponibilité, annoncé dans les journaux. Les lectures sont horodatées à la **microseconde**, afin que leur ordre soit préservé. Lorsque la persistance n'est pas assurée (Space Hugging Face sans stockage adossé), l'interface l'affiche en bannière. |
-| **FS-023** | URS-020 | **Deux accès à Blob Storage selon la cadence de changement.** Les trois artefacts de fraîcheur (23 Ko) arrivent par ***blob input binding*** et sont relus **à chaque invocation** : une nouvelle fenêtre devient effective sans redémarrage. Les artefacts lourds (253 Mo) sont téléchargés par le **SDK** au démarrage à froid puis mis en cache. Une lecture de binding en échec est journalisée et le moteur **conserve la fenêtre du démarrage** : le service se dégrade, il ne s'interrompt pas. |
-| **FS-024** | URS-012, URS-020 | La validité du cache local d'artefacts est jugée sur **la taille *et* la date** du blob. Un artefact reconstruit de taille identique est donc retéléchargé. |
-| **FS-025** | URS-021 | **Garde-fou de non-régression** : `scripts/check_metrics.py` compare les métriques d'un entraînement à `models/baseline_metrics.json` et **sort en erreur** si HitRate@5 ou Recall@5 baisse au-delà de la tolérance (défaut 10 %), ce qui bloque la publication dans la CI. La référence n'est mise à jour que délibérément (`--promote`). |
-| **FS-026** | URS-010 | Les copies déployées du cœur et de l'interface (`azure_function/`, `spaces/`, `local/`) sont **générées** depuis `src/` par `scripts/sync_recommender.py`. `--check` vérifie qu'elles sont à jour et est exécuté par la CI. |
-| **FS-028** | URS-010, URS-011 | **Contraintes d'exécution.** Azure Function : **Python 3.13** sur plan **Flex Consumption** — le plan Linux Consumption plafonne à Python 3.12 et son retrait est annoncé, et Flex Consumption n'est pas disponible dans toutes les régions. Space Hugging Face : image `python:3.13-slim`, conteneur exécuté sous l'UID 1000, application servie sur le port 7860. Environnement local : Python ≥ 3.11. À l'inférence, seules **numpy** et la bibliothèque standard sont requises. |
-| **FS-027** | URS-004 | Méthode `svd` : notes **binaires avec négatifs échantillonnés** (4 négatifs par positif), la seule variante qui classe. La variante fondée sur les étoiles de l'article est conservée pour comparaison uniquement : sa note ne dépendant que de l'article, elle ne peut pas classer pour un lecteur donné. |
+| FS-001 | URS-001, URS-002 | `Recommender.recommend(user_id, n=5, method)` returns a list of at most `n` `article_id`, never more, and never with a duplicate. `n` is exposed by the API and the interface, default **5**, range 1–10 in the interface. |
+| FS-002 | URS-003 | Method `content`: profile = mean of the embeddings (PCA-reduced) of the articles read; score = cosine similarity against the catalogue; sorted descending. |
+| FS-003 | URS-004 | Method `collab`: score = product of the latent reader × article factors (pre-trained ALS, `cf_*` artifacts). |
+| FS-004 | URS-005 | The `method` parameter selects the strategy among **`mix`, `content`, `collab`, `svd`, `hybrid`**. Default: **`mix`** (the strategy served in production, see FS-017). `hybrid` combines content and collaborative through min-max normalisation. Any other value is refused (see FS-015). |
+| FS-005 | URS-006, URS-019 | **Fallback cascade** for a reader with no usable profile, in this order: (1) the popularity of their region crossed with the freshness window, (2) the freshness window alone, (3) the popularity of their region alone, (4) popularity over the whole history. A partial list is completed by the next level. **No request ever returns an empty list.** |
+| FS-006 | URS-007 | The `article_id` values present in the reader's history are excluded from every result (score forced to `-inf`, then non-finite scores filtered out). The exclusion applies to every strategy, including the popularity slots of `mix`. |
+| FS-007 | URS-008 | The PCA projection (`pca_mean.npy`, `pca_components.npy`) is **serialised alongside the catalogue**. A new article that has an embedding is projected, appended to the catalogue, and becomes recommendable through the content route **without re-fitting the PCA** and without re-training. |
+| FS-008 | URS-009, URS-018 | A three-tab Streamlit interface: **Recommendations** (choice of reader, strategy, number of articles, freshness checkbox, "Read" marking), **Browse articles** (the full catalogue, four sort orders, filter by rating, hiding of read articles), **New reader** (sign-up). Each row shows the identifier, a star rating, the number of readers, the category, the length and the date. |
+| FS-009 | URS-010 | Three independent solutions: **Azure** — `azure_function/function_app.py`, `GET/POST /api/recommend`, artifacts read from Blob Storage; **Hugging Face** — `spaces/app.py`, a **Docker SDK** Space, `Recommender` embedded, artifacts loaded from an HF Hub model repository; **local** — `local/app.py`, artifacts on disk, **no network access**. |
+| FS-010 | URS-011 | The artifacts are loaded **once** per instance (the `_recommender` module global on the Azure side, `st.cache_resource` in the interfaces) and then reused. Inference is vectorised (numpy). |
+| FS-011 | URS-012, URS-013 | `src/prepare_model.py` produces named, deterministic artifacts (`random_state=42` for PCA and ALS); `src/collaborative_surprise.py` produces the SVD artifacts. The 22 artifacts are published to Blob Storage and to HF Hub. |
+| FS-012 | URS-014 | A Git repository; `.gitignore` excludes raw data, large artifacts and secrets. The two measurement records (`models/baseline_metrics.json`, `models/freshness_sweep.json`) are **explicitly versioned**: they serve as references. |
+| FS-013 | URS-015 | **Evaluation protocol**: a **temporal 60 / 20 / 20** split on the click timestamp. Settings are chosen on the validation period, and the test period serves only for the final measurement. Four metrics are produced: HitRate@5, Recall@5, catalogue coverage, personalisation. The candidate pool and the collaborative models are recomputed from **everything that precedes** the period being evaluated. Command: `python -m src.evaluate --split test`. |
+| FS-014 | URS-016 | Re-training is reproducible through `prepare_model.py` / `collaborative_surprise.py`. Every run is recorded in **MLflow** (parameters, metrics, git commit) and the artifacts are versioned in the model registry, making a rollback possible. |
+| FS-015 | URS-001 | Input validation: `user_id` and `n` integers; `region` an integer or absent; `history` a comma-separated list of integers; `method` a member of the set in FS-004. Any invalid input produces an explicit error (`ValueError` internally, **HTTP 400** through the API) without interrupting the service. |
+| FS-016 | URS-017 | Inputs and outputs are **anonymous numeric identifiers**. No personal or sensitive data is processed or stored. The name entered at sign-up is a display label, and the interface warns against entering personal data there. |
+| **FS-017** | URS-019 | **The strategy served in production (`mix`)**: of five slots, **four** go to the most-read articles of the **one-hour window**, and **one** to the content route, chosen from the **six-hour pool**. Measured justification: the slot given to content costs no significant accuracy and multiplies the share of catalogue exposed by 38. |
+| **FS-018** | URS-019 | **Freshness artifacts**, produced by `prepare_model`: `popular_recent.npy` (a popularity ranking over the ranking window), `candidates_recent.npy` (a candidate pool over the wider window), `recent_window.json` (window metadata: requested and effective durations, bounds, counts). The temporal anchor is the **0.999 quantile** of the timestamps, so that an outlying timestamp cannot move the window. If the window holds fewer than `min_articles` articles it is **widened automatically**, and the effective duration is reported in the metadata. |
+| **FS-019** | URS-019 | The **`fresh_only`** parameter (default **true**) restricts every strategy to the recent pool. Disabling it widens to the whole catalogue; it is exposed in the interface and the API for comparison purposes, and is not the production configuration. |
+| **FS-020** | URS-018 | **Registering a reader**: a mandatory, unique name, an **optional region**, and an optional initial profile (articles already read). Identifiers are assigned sequentially from **1 000 000**, which distinguishes them unambiguously from the dataset's readers. An empty or already-used name is refused with an explicit message. A registered reader receives recommendations **immediately**. |
+| **FS-021** | URS-018 | The API's **`history`** parameter carries the reader's profile in the request. It takes **precedence** over the artifacts and lets a **stateless** service recommend to a reader it does not know. The override is local to the request and does not modify the engine's shared state. |
+| **FS-022** | URS-022 | **Reader store**: SQLite for the local solution; **Azure Table Storage** as soon as a connection string is available (a shared or ephemeral deployment), falling back to SQLite if it is unavailable, which is announced in the logs. Reads are timestamped to the **microsecond**, so that their order is preserved. Where persistence is not guaranteed (a Hugging Face Space with no backing storage), the interface displays this as a banner. |
+| **FS-023** | URS-020 | **Two ways into Blob Storage, according to how often things change.** The three freshness artifacts (23 kB) arrive through a ***blob input binding*** and are re-read **on every invocation**: a new window takes effect with no restart. The heavy artifacts (253 MB) are downloaded by the **SDK** at cold start and then cached. A failed binding read is logged and the engine **keeps the window it started with**: the service degrades, it does not stop. |
+| **FS-024** | URS-012, URS-020 | The validity of the local artifact cache is judged on **both the size *and* the date** of the blob. An artifact rebuilt to an identical size is therefore downloaded again. |
+| **FS-025** | URS-021 | **Non-regression guard**: `scripts/check_metrics.py` compares a training run's metrics against `models/baseline_metrics.json` and **exits with an error** if HitRate@5 or Recall@5 drops beyond the tolerance (10 % by default), which blocks publication in CI. The reference is only updated deliberately (`--promote`). |
+| **FS-026** | URS-010 | The deployed copies of the core and the interface (`azure_function/`, `spaces/`, `local/`) are **generated** from `src/` by `scripts/sync_recommender.py`. `--check` verifies that they are current and is run by CI. |
+| **FS-027** | URS-004 | Method `svd`: **binary ratings with sampled negatives** (4 negatives per positive), the only variant that ranks. The variant based on article stars is kept for comparison only: since its rating depends on the article alone, it cannot rank for a given reader. |
+| **FS-028** | URS-010, URS-011 | **Runtime constraints.** Azure Function: **Python 3.13** on a **Flex Consumption** plan — the Linux Consumption plan caps at Python 3.12 and its retirement is announced, and Flex Consumption is not available in every region. Hugging Face Space: a `python:3.13-slim` image, the container run as UID 1000, the app served on port 7860. Local environment: Python ≥ 3.11. At inference time, only **numpy** and the standard library are required. |
 
 ## 3. Interfaces
 
-### 3.1 API (solution Azure) — `GET/POST /api/recommend`
+### 3.1 API (the Azure solution) — `GET/POST /api/recommend`
 
-Paramètres acceptés en chaîne de requête ou dans le corps JSON.
+Parameters accepted in the query string or in the JSON body.
 
-| Paramètre | Type | Défaut | Obligatoire | Rôle |
+| Parameter | Type | Default | Required | Role |
 |-----------|------|--------|-------------|------|
-| `user_id` | int | — | **oui** | lecteur à recommander |
-| `n` | int | 5 | non | nombre d'articles |
-| `method` | str | **`mix`** | non | stratégie (cf. FS-004) |
-| `region` | int | — | non | code de région ; n'affecte que le cold start |
-| `fresh_only` | bool | **vrai** | non | restreindre aux articles récents (cf. FS-019) |
-| `history` | str | — | non | `article_id` séparés par des virgules (cf. FS-021) |
-| `code` | str | — | **oui** | clé de fonction (niveau d'autorisation `FUNCTION`) |
+| `user_id` | int | — | **yes** | the reader to recommend to |
+| `n` | int | 5 | no | number of articles |
+| `method` | str | **`mix`** | no | strategy (see FS-004) |
+| `region` | int | — | no | region code; only affects the cold start |
+| `fresh_only` | bool | **true** | no | restrict to recent articles (see FS-019) |
+| `history` | str | — | no | comma-separated `article_id` (see FS-021) |
+| `code` | str | — | **yes** | function key (authorisation level `FUNCTION`) |
 
-Réponse `200` : `{"user_id": int, "method": str, "recommendations": [article_id, …]}`
+Response `200`:
+`{"user_id": int, "method": str, "recommendations": [article_id, …]}`
 
-Erreurs : **400** (paramètre manquant, type invalide, `method` inconnue),
-**401** (clé absente ou incorrecte), **500** (erreur interne, journalisée).
+Errors: **400** (missing parameter, invalid type, unknown `method`), **401**
+(missing or incorrect key), **500** (internal error, logged).
 
-### 3.2 Artefacts (contrat de données)
+### 3.2 Artifacts (the data contract)
 
-22 fichiers, 253 Mo, produits hors-ligne et publiés vers Blob Storage et HF Hub.
+22 files, 253 MB, produced offline and published to Blob Storage and HF Hub.
 
-| Groupe | Fichiers | Rôle |
+| Group | Files | Role |
 |--------|----------|------|
-| Requis pour démarrer | `articles_embeddings_pca.npy`, `user_clicks.pkl`, `popular_articles.npy` | leur absence lève une erreur explicite |
-| Fraîcheur | `popular_recent.npy`, `candidates_recent.npy`, `recent_window.json` | cf. FS-018, FS-023 |
-| Projection | `pca_mean.npy`, `pca_components.npy` | cf. FS-007 |
-| Collaboratif ALS | `cf_user_factors.npy`, `cf_item_factors.npy`, `cf_item_ids.npy`, `cf_user_index.pkl` | cf. FS-003 |
-| Collaboratif SVD | `svd_*` (7 fichiers) | cf. FS-027 |
-| Affichage et cold start | `article_stars.npy`, `article_clicks.npy`, `popular_by_region.pkl` | notes, effectifs, repli régional |
+| Required to start | `articles_embeddings_pca.npy`, `user_clicks.pkl`, `popular_articles.npy` | their absence raises an explicit error |
+| Freshness | `popular_recent.npy`, `candidates_recent.npy`, `recent_window.json` | see FS-018, FS-023 |
+| Projection | `pca_mean.npy`, `pca_components.npy` | see FS-007 |
+| Collaborative ALS | `cf_user_factors.npy`, `cf_item_factors.npy`, `cf_item_ids.npy`, `cf_user_index.pkl` | see FS-003 |
+| Collaborative SVD | `svd_*` (7 files) | see FS-027 |
+| Display and cold start | `article_stars.npy`, `article_clicks.npy`, `popular_by_region.pkl` | ratings, counts, regional fallback |
 
-Les artefacts absents mais optionnels (fraîcheur, régions, étoiles, SVD)
-n'empêchent pas le démarrage : la fonction correspondante est simplement
-indisponible, et l'interface l'indique.
+Artifacts that are absent but optional (freshness, regions, stars, SVD) do not
+prevent start-up: the corresponding function is simply unavailable, and the
+interface says so.
 
-### 3.3 Magasin de clients
+### 3.3 Reader store
 
-| Table / fichier | Clé | Contenu |
+| Table / file | Key | Content |
 |-----------------|-----|---------|
-| `ricochetclients` (Table Storage) | PartitionKey `client`, RowKey `user_id` | nom, date de création, région |
-| `ricochetreads` (Table Storage) | PartitionKey `user_id`, RowKey `article_id` | horodatage de lecture |
-| `clients.db` (SQLite) | — | équivalent local, même interface |
+| `ricochetclients` (Table Storage) | PartitionKey `client`, RowKey `user_id` | name, creation date, region |
+| `ricochetreads` (Table Storage) | PartitionKey `user_id`, RowKey `article_id` | read timestamp |
+| `clients.db` (SQLite) | — | the local equivalent, same interface |
 
-## 4. Comportement en cas de défaillance
+## 4. Behaviour on failure
 
-La règle est constante : **se dégrader en le disant, plutôt que s'interrompre.**
+The rule is constant: **degrade and say so, rather than stop.**
 
-| Défaillance | Comportement spécifié |
+| Failure | Specified behaviour |
 |-------------|-----------------------|
-| Artefacts de fraîcheur illisibles par binding | avertissement journalisé, fenêtre du démarrage conservée (FS-023) |
-| Artefact optionnel absent | fonction indisponible, signalée dans l'interface |
-| Artefact requis absent | erreur explicite nommant le fichier et la commande de publication |
-| Table Storage indisponible | repli sur SQLite, message journalisé (FS-022) |
-| Aucune source d'artefacts configurée (Space) | erreur explicite, pas de dépôt deviné |
-| Lecteur inconnu, aucun profil | cascade de repli, jamais de liste vide (FS-005) |
-| `method` inconnue | HTTP 400 avec le message d'erreur (FS-015) |
+| Freshness artifacts unreadable through the binding | warning logged, the start-up window kept (FS-023) |
+| An optional artifact absent | the function is unavailable, and this is shown in the interface |
+| A required artifact absent | an explicit error naming the file and the publication command |
+| Table Storage unavailable | fall back to SQLite, message logged (FS-022) |
+| No artifact source configured (Space) | an explicit error, no repository guessed |
+| Unknown reader, no profile | the fallback cascade, never an empty list (FS-005) |
+| Unknown `method` | HTTP 400 with the error message (FS-015) |
 
-## 5. Historique des révisions
+## 5. Revision history
 
-| Version | Date | Modifications | Motif |
+| Version | Date | Changes | Reason |
 |---------|------|---------------|-------|
-| 0.1 | 2026-07-20 | Émission initiale (FS-001 à FS-016). | — |
-| 0.2 | 2026-09-08 | **Corrigés** : FS-004 (ensemble des stratégies et valeur par défaut), FS-005 (cascade à quatre niveaux au lieu d'un repli simple), FS-008 (interface à trois onglets), FS-009 (trois solutions ; SDK Docker pour le Space), FS-013 (protocole d'évaluation : découpage temporel et quatre métriques, en remplacement du *leave-last-out*), FS-014 (MLflow et registre). **Ajoutés** : FS-017 à FS-027. **Ajoutés** : § 3.2 contrat d'artefacts, § 3.3 magasin de clients, § 4 comportement en cas de défaillance. | La v0.1 décrivait un système sans notion de fraîcheur, sans inscription de lecteur et avec un protocole d'évaluation depuis invalidé (le *leave-last-out* sur données complètes surestime la justesse d'un facteur 5,8, mesuré). Elle ne pouvait donc plus servir de base à l'OQ. |
+| 0.1 | 2026-07-20 | Initial issue (FS-001 to FS-016). | — |
+| 0.2 | 2026-09-08 | **Corrected**: FS-004 (the set of strategies and the default), FS-005 (a four-level cascade instead of a simple fallback), FS-008 (a three-tab interface), FS-009 (three solutions; Docker SDK for the Space), FS-013 (the evaluation protocol: a temporal split and four metrics, replacing *leave-last-out*), FS-014 (MLflow and the registry). **Added**: FS-017 to FS-028. **Added**: § 3.2 the artifact contract, § 3.3 the reader store, § 4 behaviour on failure. | v0.1 described a system with no notion of freshness, no reader sign-up, and an evaluation protocol since invalidated (*leave-last-out* on complete data overstates accuracy by a measured factor of 5.8). It could therefore no longer serve as a basis for the OQ. |
 
-> **Note de méthode.** Les identifiants FS-001 à FS-016 sont conservés : lorsqu'une
-> spécification décrivait la même fonction de façon devenue inexacte, elle a été
-> corrigée sous son identifiant d'origine. Les fonctions nouvelles reçoivent des
-> identifiants neufs. Aucun identifiant n'a été réattribué à une autre fonction.
+> **Note on method.** The identifiers FS-001 to FS-016 are kept: where a
+> specification described the same function in a way that had become inaccurate,
+> it was corrected under its original identifier. New functions receive new
+> identifiers. No identifier has been reassigned to a different function.

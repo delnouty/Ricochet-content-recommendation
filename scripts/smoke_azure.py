@@ -194,7 +194,7 @@ def main() -> int:
         print("\nSi les artefacts ont été ré-entraînés délibérément, mettre la "
               "référence à jour : `python scripts/smoke_azure.py --record`.\n"
               "Sinon, c'est un déploiement qui sert autre chose que ce qui est "
-              "publié — voir docs/deploiement_azure.md, étape 11.", file=sys.stderr)
+              "publié — voir docs/azure_deployment.md, étape 11.", file=sys.stderr)
         return 1
 
     print("\nle service déployé sert bien le modèle de référence")
