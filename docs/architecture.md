@@ -1,328 +1,363 @@
-# My Content — Note de synthèse (pour Samia)
+# Ricochet — technical and functional architecture
 
-> Objet : architecture technique & fonctionnelle du MVP de recommandation, et
-> architecture cible pour absorber l'arrivée de nouveaux utilisateurs / articles.
+> Scope: the technical and functional architecture of the recommendation MVP,
+> and the target architecture that would absorb a continuous stream of new
+> readers and new articles.
+>
+> This is the synthesis note requested as a project deliverable. People named in
+> the assignment brief are deliberately left out — this repository is public.
 
 ---
 
-## 1. Description fonctionnelle (à date)
+## 1. Functional description (as built)
 
-**User story MVP** : « En tant qu'utilisateur, je reçois une sélection de
-5 articles. »
+**MVP user story**: *as a reader, I am given a selection of 5 articles.*
 
-Parcours actuel :
+The path a request takes today:
 
-1. L'utilisateur (ou nous, via l'app de démo) choisit un `user_id`.
-2. L'application appelle un endpoint HTTP (Azure Function).
-3. La Function calcule 5 recommandations et les renvoie.
-4. L'app affiche les 5 articles.
+1. The reader (or we, through the demo app) picks a `user_id`.
+2. The application calls one HTTP endpoint — an Azure Function.
+3. The Function computes 5 recommendations and returns them.
+4. The app displays the 5 articles.
 
-## 2. Le système de recommandation
+## 2. The recommender
 
-Trois stratégies, exposées via un même service :
+Several strategies behind a single service:
 
-| Stratégie | Principe | Force | Limite |
+| Strategy | Principle | Strength | Limit |
 |-----------|----------|-------|--------|
-| **Content-based** | Profil utilisateur = moyenne des *embeddings* des articles lus ; cosinus vers le catalogue | Fonctionne dès le 1ᵉʳ clic ; gère un **nouvel article** immédiatement (il a un embedding) | N'exploite pas l'intelligence collective |
-| **Collaborative (ALS)** | Factorisation de la matrice utilisateur×article (feedback implicite) | Capte les goûts « latents », effet de surprise | **Cold start** : inefficace pour un nouvel utilisateur/article |
-| **Hybride** *(défaut)* | Mélange normalisé des deux scores | Combine les forces, dégrade proprement | Deux modèles à maintenir |
+| **Content-based** | reader profile = mean of the embeddings of the articles read, then cosine against the catalogue | works from the very first click; handles a **new article** immediately, since it has an embedding | ignores collective signal |
+| **Collaborative (ALS)** | factorisation of the reader × article matrix (implicit feedback) | captures latent taste, gives an element of surprise | **cold start**: useless for a new reader or a new article |
+| **Hybrid** | normalised blend of both scores | combines both, degrades cleanly | two models to keep in step |
+| **Mix** *(in production)* | 4 slots from the last hour of popularity + 1 content slot drawn from a 6 h candidate pool | best measured HitRate@5, and always fresh | depends on the freshness artifacts being current |
 
-**Cold start** : si l'utilisateur n'a pas d'historique exploitable, on renvoie les
-**articles les plus populaires**. C'est le filet de sécurité du MVP.
+**Cold start**: when a reader has no usable history, the service returns the
+**most popular articles**. That is the MVP's safety net, and the service is
+never allowed to return an empty list.
 
-**Astuce prod (Julien)** : les *embeddings* (250 dim) sont réduits par **ACP**
-(~50 dim) hors-ligne pour tenir dans les quotas gratuits Azure.
+**Production constraint from the brief**: the embeddings (250 dimensions) are
+reduced by **PCA** to about 50 dimensions offline, so that the artifacts fit
+inside Azure's free quotas.
 
-## 3. Architecture technique retenue — deux solutions indépendantes
+## 3. Deployment architecture — two independent solutions
 
-> Le détail dynamique — qui appelle qui, dans quel ordre, et ce que coûte un
-> démarrage à froid — est dans [`sequences.md`](sequences.md), sous forme de
-> diagrammes de séquence UML pour chacun des trois déploiements.
+> The dynamic view — who calls whom, in what order, and what a cold start
+> costs — is in [`sequences.md`](sequences.md), as one UML sequence diagram per
+> deployment.
 
-Le même cœur de reco (`src/recommender.py`) et les mêmes artefacts alimentent
-**deux solutions de déploiement autonomes**, chacune complète en elle-même.
+The same recommendation core (`src/recommender.py`) and the same artifacts feed
+**two self-contained deployments**.
 
-### 3.a — Solution Azure (serverless, « industrialisable »)
+### 3.a — Azure (serverless, the industrialisable one)
 
-Architecture 2 de Julien : *serverless sans API dédiée*, la Function accède
-directement aux modèles dans Blob Storage.
+This is *architecture 2* of the brief: serverless with no dedicated API, the
+Function reading the models straight out of Blob Storage.
 
 ```mermaid
-flowchart TB
-    subgraph blob["Azure Blob Storage — conteneur models, 22 artefacts"]
-        frais["Fraîcheur — 23 Ko<br/>popular_recent.npy<br/>candidates_recent.npy<br/>recent_window.json<br/>— change toutes les heures"]
-        lourds["Artefacts lourds — 253 Mo<br/>catalogue ACP 50 dim, historiques,<br/>étoiles, régions, facteurs ALS et SVD<br/>— change au ré-entraînement"]
+flowchart LR
+    app["<b>Local app</b><br/>Streamlit"]
+
+    subgraph azure[" Azure "]
+        direction TB
+        fn["<b>Azure Function</b><br/>/api/recommend"]
+        tables[("<b>Table Storage</b><br/>sign-ups, reads")]
+
+        subgraph blob[" Blob Storage — container <i>models</i> "]
+            direction TB
+            hot["<b>Freshness</b> · 23 kB<br/>rebuilt hourly"]
+            cold["<b>Model</b> · 253 MB<br/>rebuilt on training"]
+        end
     end
 
-    subgraph fn["Azure Function — unité déployable unique, pas d'API intermédiaire"]
-        http["Déclencheur HTTP /api/recommend<br/>user_id, n, method, region,<br/>fresh_only, history"]
-        moteur["Recommender — numpy seul<br/>mix : 4 populaires 1 h + 1 contenu vivier 6 h<br/>cascade de repli, jamais de liste vide"]
-        http --> moteur
-    end
+    app -->|"user_id, plus history<br/>if the reader is unknown"| fn
+    fn -->|"5 article_id"| app
+    app <-->|"sign-up, reads"| tables
+    hot ==>|"input binding<br/><b>every call</b> · 2 ms"| fn
+    cold -.->|"SDK, then cached<br/>cold start only · 8 s"| fn
 
-    tables[("Azure Table Storage<br/>clients inscrits et lectures")]
-    app["Application locale<br/>app/streamlit_app.py"]
-
-    frais -->|"blob input binding<br/>relu à CHAQUE appel, 2 ms"| moteur
-    lourds -->|"SDK + cache<br/>au démarrage à froid, 8 s"| moteur
-    app -->|"user_id, plus history si le lecteur<br/>est inconnu du service"| http
-    moteur -->|"5 article_id"| app
-    app <-->|"inscription et lectures"| tables
+    classDef client fill:#eef1f5,stroke:#8a94a6,color:#1b1f27
+    classDef service fill:#e3edfd,stroke:#3b7ddd,color:#1b1f27
+    classDef store fill:#fdf0e0,stroke:#d98b25,color:#1b1f27
+    class app client
+    class fn service
+    class hot,cold,tables store
+    style azure fill:#fafbfd,stroke:#c3cad6
+    style blob fill:#fffdf8,stroke:#e3c79a
 ```
 
-Deux flèches partent de Blob Storage, et c'est le point de la figure : les 23 Ko
-de fraîcheur et les 253 Mo d'artefacts lourds n'empruntent **pas** le même
-chemin. Un schéma qui les confondrait décrirait l'architecture 2 telle qu'elle
-est suggérée, non telle qu'elle est implémentée — voir la justification mesurée
-juste après.
+Two arrows leave Blob Storage, and that is the whole point of the figure: the
+23 kB of freshness data and the 253 MB of model artifacts do **not** travel the
+same way. The thick arrow is paid on every call; the dashed one is paid once per
+instance. A diagram that merged them would describe architecture 2 as it is
+*suggested*, not as it is *implemented* — the measurements that forced the split
+are below.
 
-#### Deux accès à Blob Storage, chacun là où il est le meilleur
+#### Two ways into Blob Storage, each where it is the better one
 
-Julien suggérait le *blob input binding* — la Function déclare le fichier dont
-elle a besoin, l'hôte le lit et le passe en paramètre, sans SDK ni code de
-téléchargement. Appliqué à **tous** les artefacts, ce serait un contresens : le
-binding relit le blob **à chaque invocation**, or le catalogue, les historiques,
-les étoiles et les facteurs pèsent 253 Mo. Le cache du démarrage à froid
-disparaîtrait et chaque appel paierait le téléchargement (~8 s mesurées, contre
-~200 ms aujourd'hui, soit 40×).
+The brief suggested the *blob input binding*: the Function declares the file it
+needs, the host reads it and passes it in as a parameter — no SDK, no download
+code. Applied to **every** artifact this would backfire. The binding re-reads
+the blob **on every invocation**, and the catalogue, the histories, the stars
+and the factors weigh 253 MB together. The cold-start cache would disappear and
+every single call would pay for the download: about 8 s measured, against about
+200 ms today, a factor of 40.
 
-Mais l'écarter partout coûterait autre chose. Les trois artefacts de
-**fraîcheur** changent toutes les heures, et un cache mémoire ne se rafraîchit
-que par `az functionapp restart` : le service servirait la fenêtre de son
-démarrage, indéfiniment. Sur ces fichiers-là, le binding est exactement le bon
-outil.
+Rejecting it everywhere costs something else, though. The three **freshness**
+artifacts change every hour, and an in-memory cache is only refreshed by
+`az functionapp restart` — the service would keep serving the window it started
+with, indefinitely. On those files the binding is exactly the right tool.
 
-D'où le **partage retenu** :
+Hence the split that was kept:
 
-| Artefacts | Taille | Cadence | Accès | Coût par appel |
+| Artifacts | Size | Cadence | Access | Cost per call |
 |---|---|---|---|---|
-| `popular_recent.npy`, `candidates_recent.npy`, `recent_window.json` | 23 Ko | horaire | **blob input binding** | ~2 ms |
-| catalogue ACP, historiques, étoiles, popularité segmentée, facteurs | 253 Mo | ré-entraînement | SDK + cache au démarrage à froid | 0 (cache) |
+| `popular_recent.npy`, `candidates_recent.npy`, `recent_window.json` | 23 kB | hourly | **blob input binding** | about 2 ms |
+| PCA catalogue, histories, stars, segmented popularity, factors | 253 MB | on re-training | SDK, then cached at cold start | 0 (cached) |
 
-Le binding s'applique **après** l'initialisation du moteur : `set_freshness()`
-(`src/recommender.py`) remplace la fenêtre à chaque invocation. Les trois
-fichiers restent aussi téléchargés par le SDK, non par redondance inutile mais
-comme **repli** : si une lecture du binding échoue, `_rafraichir()` journalise
-un avertissement et le moteur conserve la fenêtre du démarrage — 23 Ko payés une
-fois pour que la dégradation reste gracieuse.
+The binding applies **after** the engine is initialised: `set_freshness()`
+(`src/recommender.py`) swaps the window on each invocation. The same three files
+are still downloaded by the SDK as well — not out of pointless redundancy, but
+as a **fallback**: if a binding read fails, `_rafraichir()` logs a warning and
+the engine keeps the window it started with. 23 kB paid once, so that the
+degradation stays graceful.
 
-**Vérification en production**, sans redémarrage :
-
-```
-appel initial                       → 211442, 50644, 36162, 156279, 159938
-remplacement de popular_recent.npy dans Blob (aucun restart)
-appel suivant                       → 209122, 224730, 205824, 70986, 159938
-```
-
-Les quatre créneaux de popularité suivent le nouveau fichier ; le cinquième
-(contenu, issu de `candidates_recent.npy` inchangé) ne bouge pas. C'est la
-preuve que la fraîcheur est bien relue à chaque appel — et que les artefacts
-lourds, eux, restent en cache.
-
-### 3.b — Solution Hugging Face (démo publique, auto-suffisante)
-
-Un Space Streamlit **embarque** le Recommender et calcule les recos sur place ;
-il charge les artefacts depuis un dépôt de modèle HF Hub (équivalent HF de Blob
-Storage). Aucun appel à Azure : les deux solutions sont indépendantes.
+**Verified in production**, with no restart:
 
 ```
-┌───────────────────────────────┐   charge   ┌────────────────────────┐
-│  HF Space (Streamlit +        │ ─────────▶ │  HF Hub                │
-│  Recommender, numpy)          │            │  dépôt de modèle       │
-│  calcule les 5 articles       │            │  (artefacts)           │
-└───────────────────────────────┘            └────────────────────────┘
+first call                          -> 211442, 50644, 36162, 156279, 159938
+popular_recent.npy replaced in Blob (no restart)
+next call                           -> 209122, 224730, 205824, 70986, 159938
 ```
 
-**Pourquoi deux solutions** : Azure porte l'argument *industrialisable /
-serverless* ; Hugging Face porte la *démo publique* facile à partager. Toutes
-deux partent des mêmes artefacts produits hors-ligne par `src/prepare_model.py`
-(données brutes → ACP + ALS → artefacts). L'inférence ne dépend que de numpy.
+The four popularity slots follow the new file; the fifth — the content slot,
+drawn from an unchanged `candidates_recent.npy` — does not move. That is the
+proof that freshness really is re-read on every call, and that the heavy
+artifacts really do stay cached.
 
-### Composants du dépôt
+### 3.b — Hugging Face (public demo, self-sufficient)
 
-| Dossier | Rôle |
+A Space **embeds** the Recommender and computes the recommendations in place,
+loading the artifacts from an HF Hub model repository — the HF equivalent of
+Blob Storage. It never calls Azure: the two solutions are independent.
+
+```mermaid
+flowchart LR
+    visitor["<b>Any visitor</b><br/>no key, no account"]
+    space["<b>HF Space</b> — Docker<br/>Streamlit + Recommender<br/>computes the 5 articles"]
+    hub[("<b>HF Hub</b><br/>model repository<br/>artifacts")]
+
+    visitor --> space
+    space -.->|"downloaded once<br/>at start-up"| hub
+
+    classDef client fill:#eef1f5,stroke:#8a94a6,color:#1b1f27
+    classDef service fill:#e8f5ec,stroke:#39a05a,color:#1b1f27
+    classDef store fill:#fdf0e0,stroke:#d98b25,color:#1b1f27
+    class visitor client
+    class space service
+    class hub store
+```
+
+**Why two solutions**: Azure carries the *industrialisable, serverless*
+argument; Hugging Face carries the *public demo* that is easy to hand to
+someone. Both start from the same artifacts, produced offline by
+`src/prepare_model.py` (raw data → PCA + ALS → artifacts). Inference itself
+depends on nothing but numpy.
+
+### Repository components
+
+| Directory | Role |
 |---------|------|
-| `src/` | cœur de reco + préparation des artefacts (source de vérité) |
-| `notebooks/` | exploration & comparaison des modèles |
-| `azure_function/` | **solution Azure** : service serverless (Archi 2) |
-| `app/` | app Streamlit locale appelant l'Azure Function |
-| `spaces/` | **solution Hugging Face** : Space Streamlit auto-suffisant |
-| `models/` | artefacts générés (poussés vers Blob **et** HF Hub) |
+| `src/` | recommendation core and artifact preparation — the source of truth |
+| `notebooks/` | exploration and model comparison |
+| `azure_function/` | **the Azure solution**: the serverless service (architecture 2) |
+| `app/` | local Streamlit app calling the Azure Function |
+| `spaces/` | **the Hugging Face solution**: a self-sufficient Space |
+| `models/` | generated artifacts, pushed to Blob **and** to HF Hub |
+| `infra/` | the Azure stack as Terraform code |
 
-## 4. Architecture cible (nouveaux utilisateurs / nouveaux articles)
+## 4. Target architecture (new readers, new articles)
 
-Le MVP recalcule tout hors-ligne par lots. À l'échelle, il faut **intégrer les
-nouveautés en continu** sans tout recalculer. C'est le point déterminant du
-produit : un portail d'actualité publie en permanence, et l'essentiel de son
-audience est composé de visiteurs peu ou pas connus.
+The MVP recomputes everything offline, in batch. At scale, novelty has to be
+**absorbed continuously** instead. This is the decisive point for the product: a
+news portal publishes all the time, and most of its audience is barely known or
+not known at all.
 
-### 4.a — Ce que coûte chaque nouveauté
+### 4.a — What each kind of novelty costs
 
-| Événement | Ce qu'il faut recalculer | Latence atteignable | Ré-entraînement ? |
+| Event | What has to be recomputed | Achievable latency | Re-training? |
 |---|---|---|---|
-| **Nouvel article** | son embedding, sa projection ACP, ajout au catalogue | minutes | **non** |
-| **Nouveau clic** (utilisateur connu) | son profil = moyenne des embeddings lus (calcul à la demande) | temps réel | **non** |
-| **Nouvel utilisateur** | rien avant le 1ᵉʳ clic (popularité), profil de contenu ensuite | temps réel | **non** |
-| Couverture *collaborative* d'un nouvel utilisateur | ses facteurs latents | heures (fold-in) à un jour (lot) | oui, partiel ou complet |
-| Dérive du catalogue (thèmes nouveaux) | ré-ajustement de l'ACP + recalcul de tout le catalogue | planifié (p. ex. mensuel) | oui, complet |
+| **New article** | its embedding, its PCA projection, its row in the catalogue | minutes | **no** |
+| **New click** (known reader) | the profile, i.e. the mean of the embeddings read — computed on demand | real time | **no** |
+| **New reader** | nothing before the first click (popularity), then a content profile | real time | **no** |
+| *Collaborative* coverage of a new reader | that reader's latent factors | hours (fold-in) to a day (batch) | yes, partial or full |
+| Catalogue drift (genuinely new topics) | re-fitting the PCA, then recomputing the whole catalogue | scheduled, e.g. monthly | yes, full |
 
-La lecture importante de ce tableau : **seule la partie collaborative impose un
-ré-entraînement**. Les deux besoins immédiats (nouvel article visible tout de
-suite, nouvel utilisateur servi dès son premier clic) sont couverts par le
-content-based, à condition que deux prérequis soient satisfaits — c'est l'objet
-des deux sous-sections suivantes.
+The important reading of this table: **only the collaborative part forces a
+re-training**. The two immediate needs — a new article visible at once, a new
+reader served from the first click — are covered by the content-based model,
+provided two prerequisites hold. Those are the next two subsections.
 
-### 4.b — Prérequis 1 : la projection ACP doit être persistée
+### 4.b — Prerequisite 1: the PCA projection must be persisted
 
-Le catalogue est réduit de 250 à 50 dimensions par ACP. Un nouvel article arrive
-avec un embedding de 250 dimensions : pour le comparer aux autres, il faut le
-placer dans **la même base**. Or une ACP ré-ajustée produit une base *différente* :
-tous les vecteurs déjà stockés deviendraient incomparables et devraient être
-recalculés (364 k articles), ainsi que tout index construit dessus.
+The catalogue is reduced from 250 to 50 dimensions by PCA. A new article arrives
+with a 250-dimension embedding, and to be comparable with the others it must be
+placed in **the same basis**. A re-fitted PCA produces a *different* basis: every
+vector already stored would become incomparable and would have to be recomputed
+— 364 k articles — along with any index built on top of them.
 
-`src/prepare_model.py` sérialise donc la projection elle-même, à côté du
-catalogue réduit :
+`src/prepare_model.py` therefore serialises the projection itself, next to the
+reduced catalogue:
 
-| Artefact | Contenu | Taille |
+| Artifact | Content | Size |
 |---|---|---|
-| `articles_embeddings_pca.npy` | catalogue réduit (lu à l'inférence) | ~73 Mo |
-| `pca_mean.npy` + `pca_components.npy` | **la projection** (moyenne + axes) | ~51 Ko |
+| `articles_embeddings_pca.npy` | the reduced catalogue, read at inference time | about 73 MB |
+| `pca_mean.npy` + `pca_components.npy` | **the projection**: mean and axes | about 51 kB |
 
-Intégrer un article devient alors une opération locale, sans ré-entraînement. Le
-dépôt fournit le chemin complet :
+Ingesting an article then becomes a local operation, with no re-training. The
+repository ships the whole path:
 
 ```bash
-python scripts/add_articles.py --embeddings nouveaux.npy --dry-run   # contrôle
-python scripts/add_articles.py --embeddings nouveaux.npy             # intégration
+python scripts/add_articles.py --embeddings new.npy --dry-run   # check
+python scripts/add_articles.py --embeddings new.npy             # ingest
 ```
 
-Le script projette les embeddings, les ajoute au catalogue par **écriture
-atomique** et affiche les `article_id` attribués (les identifiants sont les
-indices de ligne du catalogue). Un garde-fou refuse un ajout déjà effectué
-(empreintes de lignes), afin qu'une relance n'introduise pas de doublons.
+The script projects the embeddings, appends them to the catalogue with an
+**atomic write**, and prints the `article_id` values assigned — identifiers are
+row indices in the catalogue. A guard refuses an ingestion that has already been
+performed, by row fingerprint, so that re-running it introduces no duplicates.
 
-En bibliothèque, la projection seule :
+As a library, the projection alone:
 
 ```python
 from src.prepare_model import project_embeddings
-vecteur = project_embeddings(embedding_brut, models_dir)   # (1, 50), numpy seul
+vector = project_embeddings(raw_embedding, models_dir)   # (1, 50), numpy only
 ```
 
-Vérification faite sur le catalogue réel : 3 articles ajoutés reçoivent les
-identifiants 364047–364049 et **entrent immédiatement dans le top-5** d'un
-utilisateur dont ils sont proches, sans qu'aucun modèle n'ait été ré-entraîné.
+Checked against the real catalogue: 3 added articles receive identifiers
+364047–364049 and **enter the top-5 immediately** for a reader they are close
+to, without any model being re-trained.
 
-Ces 51 Ko sont ce qui distingue « nouvel article intégrable en minutes » de
-« nouvel article nécessitant un recalcul complet du catalogue ». La contrepartie
-est réelle : la base ACP reste celle du corpus d'origine. Des thématiques
-nouvelles y sont donc de moins en moins bien représentées (aujourd'hui 50
-composantes = 94,5 % de variance expliquée) — d'où le **ré-ajustement planifié**
-de la dernière ligne du tableau 4.a, avec versionnage de l'artefact et bascule
-atomique.
+Those 51 kB are what separates "a new article ingestible in minutes" from "a new
+article requiring a full catalogue rebuild". The trade-off is real: the PCA basis
+stays the one fitted on the original corpus, so genuinely new topics are
+represented less and less well — today 50 components account for 94.5 % of the
+explained variance. Hence the **scheduled re-fit** on the last row of table 4.a,
+with a versioned artifact and an atomic switchover.
 
-### 4.c — Prérequis 2 : les profils sortent des artefacts
+### 4.c — Prerequisite 2: profiles must move out of the artifacts
 
-Aujourd'hui `user_clicks.pkl` est une **photo d'un lot**, en lecture seule et
-chargée en mémoire dans chaque instance. Ce choix ne survit pas à la cible, pour
-deux raisons indépendantes : il n'existe aucun chemin d'écriture pour un clic qui
-vient d'avoir lieu, et l'historique de tous les utilisateurs ne peut pas résider
-dans le processus d'inférence.
+Today `user_clicks.pkl` is a **snapshot of a batch**: read-only, and loaded into
+the memory of every instance. That choice does not survive into the target, for
+two independent reasons — there is no write path for a click that has just
+happened, and the history of every reader cannot live inside the inference
+process.
 
-En cible, le profil devient une **lecture indexée** dans un store (Cosmos DB ou
-Table Storage) : les clics récents d'un utilisateur (une fenêtre de N articles
-suffit pour un profil de contenu), écrits par l'ingestion événementielle, lus par
-le service de recommandation. Conséquences :
+In the target, a profile becomes an **indexed read** against a store, Cosmos DB
+or Table Storage: a reader's recent clicks — a window of N articles is enough
+for a content profile — written by event ingestion, read by the recommendation
+service. Consequences:
 
-- `user_clicks.pkl` disparaît des artefacts de service ;
-- `popular_articles.npy` est recalculé sur **fenêtre glissante** et non sur tout
-  l'historique — le repli cold start devient « populaire *en ce moment* », ce qui
-  est la seule définition utile pour de l'actualité ;
-- les facteurs `cf_*` restent des artefacts versionnés, produits par lot.
+- `user_clicks.pkl` disappears from the served artifacts;
+- `popular_articles.npy` is recomputed over a **sliding window** rather than the
+  whole history, so the cold-start fallback becomes "popular *right now*", which
+  is the only useful definition for news;
+- the `cf_*` factors remain versioned artifacts, produced in batch.
 
-### 4.d — Modèle collaboratif : fold-in puis lot
+### 4.d — The collaborative model: fold-in, then batch
 
-L'ALS n'est pas incrémental *au sens strict*, mais les facteurs d'un utilisateur
-peuvent être résolus contre les facteurs articles existants sans tout réapprendre
-(`partial_fit_users` de la bibliothèque `implicit`). Cela donne une gradation :
+ALS is not incremental *in the strict sense*, but one reader's factors can be
+solved against the existing article factors without relearning everything —
+`partial_fit_users` in the `implicit` library. That gives a gradation:
 
-1. **temps réel** — content-based, dès le 1ᵉʳ clic ;
-2. **quelques heures** — fold-in ALS : l'utilisateur entre dans le collaboratif
-   sans ré-entraînement complet ;
-3. **planifié** — ré-entraînement complet, qui recale l'ensemble des facteurs.
+1. **real time** — content-based, from the first click;
+2. **a few hours** — ALS fold-in: the reader enters the collaborative model
+   without a full re-training;
+3. **scheduled** — a full re-training, which realigns all the factors.
 
-Entre deux ré-entraînements, tout utilisateur ou article absent des facteurs
-retombe proprement sur le content-based, puis sur la popularité : la dégradation
-est explicite et déjà implémentée dans `recommend()`.
+Between two re-trainings, any reader or article absent from the factors falls
+back cleanly to content-based, then to popularity. The degradation is explicit
+and already implemented in `recommend()`.
 
-### 4.e — Flux cible
+### 4.e — Target flow
 
+```mermaid
+flowchart TB
+    clicks["Click events"] --> hub["Event Hub / Queue"]
+    hub --> ingest["Ingestion Function"]
+    ingest --> profiles[("<b>Profile store</b><br/>Cosmos DB<br/>recent clicks per reader")]
+
+    article["New article"] --> emb["Embedding"]
+    emb --> proj["Persisted PCA projection<br/>pca_mean + pca_components<br/>see 4.b"]
+    proj --> cat[("<b>Catalogue</b><br/>Blob Storage")]
+
+    batch["Scheduled ALS re-training<br/>Azure ML or timer Function"] --> factors[("<b>Versioned factors</b><br/>cf_*.npy")]
+
+    profiles --> api["<b>Dedicated recommendation API</b> — architecture 1<br/>scaling · cache · model versioning · A/B testing"]
+    cat --> api
+    factors --> api
+    api --> apps["Client applications"]
+
+    classDef event fill:#f4ecfa,stroke:#8d5bb5,color:#1b1f27
+    classDef service fill:#e3edfd,stroke:#3b7ddd,color:#1b1f27
+    classDef store fill:#fdf0e0,stroke:#d98b25,color:#1b1f27
+    classDef client fill:#eef1f5,stroke:#8a94a6,color:#1b1f27
+    class clicks,hub,article event
+    class ingest,emb,proj,batch,api service
+    class profiles,cat,factors store
+    class apps client
 ```
-   Événements de clic ─▶ Event Hub / Queue ─▶ Function (ingestion)
-                                                    │
-                                                    ▼
-                          ┌─────────────────────────────────────┐
-                          │  Feature store / base des profils    │
-                          │  (Cosmos DB : clics récents par user) │
-                          └───────────────────┬───────────────────┘
-   Ré-entraînement ALS planifié (batch) ──────┘
-   (Azure ML / Function timer)
-                                                    │
-   Nouvel article ─▶ embedding ─▶ projection ACP persistée ─▶ catalogue (Blob)
-                                  (pca_mean + pca_components, cf. 4.b)
-                                                    │
-                                                    ▼
-   API de recommandation dédiée (Archi 1) ◀── modèles + profils à jour
-        │  (mise à l'échelle, cache, versionnage des modèles)
-        ▼
-     Applications clientes
-```
 
-### 4.f — Cadences et responsabilités
+### 4.f — Cadences and ownership
 
-| Traitement | Déclencheur | Composant | Artefact touché |
+| Job | Trigger | Component | Artifact touched |
 |---|---|---|---|
-| Projection d'un nouvel article | publication | Function d'ingestion | `articles_embeddings_pca.npy` |
-| Écriture d'un clic | événement | Event Hub → Function | store de profils |
-| Popularité glissante | horaire | Function timer | `popular_articles.npy` |
-| Fold-in ALS | horaire | Function timer | facteurs utilisateurs |
-| Ré-entraînement ALS complet | quotidien | Azure ML / lot | `cf_*.npy` versionnés |
-| Ré-ajustement ACP | mensuel + surveillance de la variance expliquée | Azure ML / lot | catalogue + projection, versionnés |
+| Projecting a new article | publication | ingestion Function | `articles_embeddings_pca.npy` |
+| Writing a click | event | Event Hub → Function | profile store |
+| Sliding popularity | hourly | timer Function | `popular_articles.npy` |
+| ALS fold-in | hourly | timer Function | reader factors |
+| Full ALS re-training | daily | Azure ML / batch | versioned `cf_*.npy` |
+| PCA re-fit | monthly, plus explained-variance monitoring | Azure ML / batch | catalogue and projection, versioned |
 
-Autres décisions de cible :
+Other target decisions:
 
-- **Passage à l'Architecture 1 (API dédiée)** quand le trafic croît : découplage
-  application ↔ modèle, mise à l'échelle indépendante, cache, A/B testing et
-  **versionnage** des modèles.
-- **Génération de candidats** : le MVP score le catalogue entier à chaque appel
-  (364 k produits scalaires). En cible, un index de similarité (ANN) restreint à
-  quelques centaines de candidats avant le classement.
-- **Récence** : pondération par l'âge de l'article, absente du MVP et pourtant
-  structurante pour de l'actualité.
-- **Suivi** : Application Insights (latence, taux d'erreur) + métriques métier
-  (CTR sur les recommandations) pour piloter les itérations.
+- **Move to architecture 1, a dedicated API**, once traffic grows: application
+  and model decoupled, scaled independently, with a cache, A/B testing and
+  proper model **versioning**.
+- **Candidate generation**: the MVP scores the entire catalogue on every call —
+  364 k dot products. In the target, an approximate-nearest-neighbour index
+  narrows this to a few hundred candidates before ranking.
+- **Recency**: weighting by article age, absent from the MVP and yet structural
+  for news.
+- **Monitoring**: Application Insights for latency and error rate, plus business
+  metrics — click-through rate on the recommendations — to steer the iterations.
 
-### 4.g — Ce qui est réellement implémenté à ce stade
+### 4.g — What is actually implemented at this stage
 
-Pour éviter toute ambiguïté sur le périmètre du MVP :
+So that the MVP's perimeter is unambiguous:
 
-| Élément de la cible | État |
+| Target element | State |
 |---|---|
-| Projection ACP persistée + fonction de projection | **implémenté** (`project_embeddings`, testé) |
-| **Intégration d'un nouvel article** (projection + ajout au catalogue) | **implémenté en lot** (`scripts/add_articles.py`, testé) |
-| Dégradation collaboratif → contenu → popularité | **implémenté** (`recommend()`) |
-| **Rafraîchissement de la fenêtre de fraîcheur sans redémarrage** | **implémenté** (blob input binding + `set_freshness()`, vérifié en production) |
-| Déclenchement *événementiel* de cette intégration (Event Hub → Function) | conçu, non implémenté |
-| Store de profils, écriture des clics | conçu, non implémenté |
-| Fold-in ALS, ré-entraînements planifiés | conçu, non implémenté |
-| Index ANN, récence, versionnage des modèles | conçu, non implémenté |
+| Persisted PCA projection and projection function | **implemented** (`project_embeddings`, tested) |
+| **Ingesting a new article** (projection and catalogue append) | **implemented, in batch** (`scripts/add_articles.py`, tested) |
+| Degradation collaborative → content → popularity | **implemented** (`recommend()`) |
+| **Refreshing the freshness window without a restart** | **implemented** (blob input binding and `set_freshness()`, verified in production) |
+| *Event-driven* trigger for that ingestion (Event Hub → Function) | designed, not implemented |
+| Profile store, click writes | designed, not implemented |
+| ALS fold-in, scheduled re-trainings | designed, not implemented |
+| ANN index, recency, model versioning | designed, not implemented |
 
-Le MVP est un **démonstrateur du moteur de recommandation**, pas un service de
-production : il en implémente la fonction de classement et documente la chaîne
-qui resterait à construire.
+The MVP is a **demonstrator of the recommendation engine**, not a production
+service: it implements the ranking function and documents the chain that would
+still have to be built.
 
-## 5. Limites connues & prochaines étapes
+## 5. Known limits and next steps
 
-- Évaluation encore basique (HitRate@5 en leave-last-out) → ajouter
-  MAP@k / couverture / diversité.
-- Pas encore de gestion de la fraîcheur des articles (récence).
-- Sécurité : clé de fonction pour le MVP → passer à une vraie auth à terme.
+- No confidence interval on the strategy comparison yet: 0.2500 against 0.2525
+  HitRate@5 is a difference the current protocol cannot call significant.
+- No recency weighting on articles, only the freshness window.
+- No custom Application Insights metric: latency and errors are visible, the
+  business signal is not.
+- Security: a function key is enough for the MVP, real authentication is not.
+- Deployment is still manual (`func azure functionapp publish`), and Terraform
+  describes the stack without yet owning it — see
+  [`../infra/README.md`](../infra/README.md).
