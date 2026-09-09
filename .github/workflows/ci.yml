@@ -11,7 +11,13 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # `dev` est la branche de travail, `main` la branche de version. Sans `dev`
+    # ici, un push de travail ne déclenchait rien : les défauts n'apparaissaient
+    # qu'à l'ouverture de la fusion, c'est-à-dire trop tard pour être bon marché.
+    branches: [main, dev]
+  # Toutes les cibles : une fusion vers `main` doit être vérifiée même si la
+  # branche d'origine l'a déjà été, parce que la fusion peut casser ce que les
+  # deux côtés validaient séparément.
   pull_request:
   workflow_dispatch:
 
@@ -72,3 +78,28 @@ jobs:
         # Hugging Face — et n'importe lequel des trois dans un `.md`, alors que
         # les commandes de déploiement vivent dans la documentation.
         run: python scripts/check_secrets.py
+
+  # Le poste de développement n'a pas Terraform installé : la configuration de
+  # `infra/` a donc été écrite sans jamais être validée. Cette vérification est
+  # ce qui la fait passer d'intention documentée à code contrôlé, et elle ne
+  # demande **aucun accès à Azure** — `init -backend=false` récupère seulement
+  # le fournisseur, `validate` contrôle le schéma hors ligne.
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      - name: Mise en forme canonique
+        # `-diff` imprime la correction à appliquer : c'est le moyen d'obtenir
+        # un format juste sans avoir Terraform en local.
+        run: terraform -chdir=infra fmt -check -diff
+
+      - name: Schéma des ressources
+        run: |
+          terraform -chdir=infra init -backend=false
+          terraform -chdir=infra validate
