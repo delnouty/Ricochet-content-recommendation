@@ -1,14 +1,14 @@
-# Infrastructure Azure de Ricochet.
+# Azure infrastructure for Ricochet.
 #
-# Ce fichier décrit **ce qui est déployé**, et non un exemple générique : noms,
-# région et réglages correspondent à la pile créée à la main en septembre 2026
-# (voir `docs/deploiement_azure.md`, étape 5). Il est donc à la fois une
-# définition pour créer un nouvel environnement et une description importable de
-# l'environnement existant — voir `infra/README.md`.
+# This file describes **what is deployed**, not a generic example: names, region
+# and settings match the stack created by hand in September 2026 (see
+# `docs/deploiement_azure.md`, step 5). It is therefore both a definition for
+# creating a new environment and an importable description of the existing one —
+# see `infra/README.md`.
 #
-# Trois ressources, pas quatre : il n'y a **pas** d'API dédiée devant le modèle.
-# C'est l'« architecture 2 » — la Function lit Blob Storage elle-même. L'absence
-# d'un quatrième composant est un choix, mesuré, pas un oubli.
+# Three resources, not four: there is **no** dedicated API in front of the
+# model. This is "architecture 2" — the Function reads Blob Storage itself. The
+# absence of that fourth component is a measured choice, not an omission.
 
 terraform {
   required_version = ">= 1.5"
@@ -16,14 +16,14 @@ terraform {
   required_providers {
     azurerm = {
       source = "hashicorp/azurerm"
-      # `azurerm_function_app_flex_consumption` n'existe qu'à partir de la v4.
+      # `azurerm_function_app_flex_consumption` only exists from v4 onwards.
       version = "~> 4.0"
     }
   }
 
-  # État local par défaut : suffisant pour un projet à un seul opérateur. Dès
-  # qu'une deuxième personne applique, il faut un état distant et verrouillé,
-  # sinon deux `apply` concurrents se marchent dessus :
+  # Local state by default: enough for a single-operator project. As soon as a
+  # second person applies, the state has to be remote and locked, otherwise two
+  # concurrent `apply` runs will tread on each other:
   #
   # backend "azurerm" {
   #   resource_group_name  = "rg-ricochet-tfstate"
@@ -37,7 +37,7 @@ provider "azurerm" {
   features {}
 }
 
-# ── Groupe de ressources ─────────────────────────────────────────────────────
+# ── Resource group ───────────────────────────────────────────────────────────
 resource "azurerm_resource_group" "ricochet" {
   name     = var.resource_group_name
   location = var.location
@@ -45,45 +45,45 @@ resource "azurerm_resource_group" "ricochet" {
   tags = local.tags
 }
 
-# ── Compte de stockage ───────────────────────────────────────────────────────
-# Un seul compte porte tout : les artefacts du modèle (blobs), le paquet de
-# déploiement de la Function, et les clients inscrits (tables). C'est ce qui
-# permet à Table Storage de ne coûter aucune ressource supplémentaire.
+# ── Storage account ──────────────────────────────────────────────────────────
+# A single account carries everything: the model artifacts (blobs), the
+# Function's deployment package, and the registered readers (tables). That is
+# what lets Table Storage cost no additional resource.
 resource "azurerm_storage_account" "ricochet" {
   name                     = var.storage_account_name
   resource_group_name      = azurerm_resource_group.ricochet.name
   location                 = azurerm_resource_group.ricochet.location
   account_tier             = "Standard"
-  account_replication_type = "LRS" # démonstration : pas de réplication géo
+  account_replication_type = "LRS" # a demonstration: no geo-replication
 
-  # Les artefacts sont régénérables et ne contiennent aucune donnée personnelle,
-  # mais rien ne justifie un accès anonyme : la Function s'authentifie.
+  # The artifacts are regenerable and contain no personal data, but nothing
+  # justifies anonymous access either: the Function authenticates.
   allow_nested_items_to_be_public = false
   min_tls_version                 = "TLS1_2"
 
   tags = local.tags
 }
 
-# Artefacts du modèle : 22 fichiers, ~253 Mo, lus par la Function.
+# Model artifacts: 22 files, about 253 MB, read by the Function.
 resource "azurerm_storage_container" "models" {
   name                  = var.models_container_name
   storage_account_id    = azurerm_storage_account.ricochet.id
   container_access_type = "private"
 }
 
-# Paquet de déploiement de la Function. Conteneur **distinct** des artefacts :
-# `func azure functionapp publish` y écrit à chaque déploiement, et le mélanger
-# avec les artefacts du modèle ferait qu'un déploiement toucherait au même
-# espace que les données du modèle.
+# The Function's deployment package. A container **separate** from the
+# artifacts: `func azure functionapp publish` writes to it on every deployment,
+# and mixing it with the model artifacts would mean a deployment touching the
+# same space as the model data.
 resource "azurerm_storage_container" "deployments" {
   name                  = "deployments"
   storage_account_id    = azurerm_storage_account.ricochet.id
   container_access_type = "private"
 }
 
-# Clients inscrits dans l'application, et leurs lectures. Deux tables, dessinées
-# pour la seule lecture dont l'application a besoin : l'historique d'un lecteur
-# est une partition (cf. `src/user_store_azure.py`).
+# Readers registered in the application, and their reads. Two tables, shaped for
+# the only read the application needs: one reader's history is one partition
+# (see `src/user_store_azure.py`).
 resource "azurerm_storage_table" "clients" {
   name               = "ricochetclients"
   storage_account_id = azurerm_storage_account.ricochet.id
@@ -94,17 +94,18 @@ resource "azurerm_storage_table" "reads" {
   storage_account_id = azurerm_storage_account.ricochet.id
 }
 
-# ── Plan et Function ─────────────────────────────────────────────────────────
-# Flex Consumption (`FC1`) et non Consumption : le plan Linux Consumption
-# plafonne à Python 3.12 et son retrait est annoncé pour le 30 septembre 2028.
-# Flex gère Python 3.13, donc les versions locale et distante coïncident.
-# Contrainte à connaître : Flex n'existe pas dans toutes les régions —
+# ── Plan and Function ────────────────────────────────────────────────────────
+# Flex Consumption (`FC1`) rather than Consumption: the Linux Consumption plan
+# caps at Python 3.12 and its retirement is announced for 30 September 2028.
+# Flex handles Python 3.13, so the local and remote versions coincide.
+# One constraint to know: Flex does not exist in every region —
 # `az functionapp list-flexconsumption-locations`.
 resource "azurerm_service_plan" "ricochet" {
-  # Nom paramétré, et non déduit de celui de la Function : Azure en attribue un
-  # automatiquement lorsqu'on crée la Function avec `az functionapp create`
-  # (ici `ASP-rgricochet-d9cf`), et un nom déduit ne correspondrait pas à
-  # l'existant — l'import échouerait ou créerait un plan en double.
+  # The name is a parameter rather than derived from the Function's: Azure
+  # assigns one automatically when the Function is created with
+  # `az functionapp create` (here `ASP-rgricochet-d9cf`), and a derived name
+  # would not match what exists — the import would fail, or would create a
+  # duplicate plan.
   name                = var.service_plan_name
   resource_group_name = azurerm_resource_group.ricochet.name
   location            = azurerm_resource_group.ricochet.location
@@ -128,15 +129,15 @@ resource "azurerm_function_app_flex_consumption" "ricochet" {
   runtime_name    = "python"
   runtime_version = "3.13"
 
-  # 2 048 Mo : le démarrage à froid charge 253 Mo d'artefacts en mémoire, plus
-  # numpy. 512 Mo ne suffisent pas.
+  # 2048 MB: the cold start loads 253 MB of artifacts into memory, plus numpy.
+  # 512 MB is not enough.
   instance_memory_in_mb  = 2048
   maximum_instance_count = var.maximum_instance_count
 
-  # La chaîne de connexion vient de l'attribut de la ressource, jamais d'une
-  # valeur écrite dans ce fichier : le secret n'existe donc nulle part en clair.
-  # C'est un gain réel de l'infrastructure décrite en code sur les commandes
-  # `az` du tutoriel, où la chaîne circule dans le terminal.
+  # The connection string comes from the resource attribute, never from a value
+  # written into this file: the secret therefore exists nowhere in clear text.
+  # This is a real gain of infrastructure-as-code over the tutorial's `az`
+  # commands, where the string travels through the terminal.
   app_settings = {
     AZURE_STORAGE_CONNECTION_STRING = azurerm_storage_account.ricochet.primary_connection_string
     MODELS_CONTAINER                = azurerm_storage_container.models.name
@@ -149,8 +150,8 @@ resource "azurerm_function_app_flex_consumption" "ricochet" {
 
 locals {
   tags = {
-    projet      = "ricochet"
+    project     = "ricochet"
     environment = var.environment
-    gere_par    = "terraform"
+    managed_by  = "terraform"
   }
 }
