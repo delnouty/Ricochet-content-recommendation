@@ -43,6 +43,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
       - name: Aucun fichier volumineux versionné
         # Données et artefacts doivent rester hors du dépôt (Blob / HF Hub).
         run: |
@@ -60,9 +64,11 @@ jobs:
           fi
           echo "models/ propre"
 
-      - name: Les notebooks ne contiennent pas de secret
-        run: |
-          if git grep -nEi '(AZURE_STORAGE_CONNECTION_STRING|HF_TOKEN)\s*=\s*["'"'"'][^"'"'"']+' -- '*.ipynb' '*.py'; then
-            echo "Secret potentiellement en clair"; exit 1
-          fi
-          echo "aucun secret en clair"
+      - name: Aucun secret en clair
+        # Remplace une vérification qui ne cherchait que des affectations
+        # `AZURE_STORAGE_CONNECTION_STRING=` / `HF_TOKEN=` dans les `.py` et
+        # `.ipynb`. Elle laissait passer une chaîne de connexion collée telle
+        # quelle, une clé de fonction dans une URL (`?code=…`), un jeton
+        # Hugging Face — et n'importe lequel des trois dans un `.md`, alors que
+        # les commandes de déploiement vivent dans la documentation.
+        run: python scripts/check_secrets.py

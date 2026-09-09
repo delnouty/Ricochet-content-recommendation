@@ -120,11 +120,43 @@ Ne demande **aucune donnée** (le jeu Globo pèse 221 Mo et n'est pas versionné
 
 | Étape | Vérifie |
 |---|---|
-| `pytest tests/` | le cœur de reco, sur artefacts synthétiques |
+| `pytest tests/` | le cœur de reco, sur artefacts synthétiques — 78 tests |
 | `sync_recommender.py --check` | les trois copies déployées du cœur sont à jour |
 | taille des fichiers | aucun fichier > 5 Mo versionné |
 | artefacts | aucun `.npy` / `.pkl` / `.db` dans git |
-| secrets | aucune clé en clair dans le code ou les notebooks |
+| `check_secrets.py` | aucun secret en clair, **dans aucun fichier suivi** |
+
+#### La vérification des secrets, et pourquoi elle a été refaite
+
+La version précédente ne cherchait que des affectations
+`AZURE_STORAGE_CONNECTION_STRING=` ou `HF_TOKEN=` dans les `.py` et `.ipynb`.
+Elle laissait donc passer trois formes que ce projet manipule réellement :
+
+- une chaîne de connexion collée telle quelle (`DefaultEndpointsProtocol=…`) ;
+- une **clé de fonction dans une URL** (`?code=…`) — la forme sous laquelle
+  cette clé circule dans toutes les commandes de déploiement ;
+- n'importe laquelle des deux dans un fichier `.md`, alors que les commandes de
+  déploiement vivent dans la documentation.
+
+`scripts/check_secrets.py` couvre les chaînes de connexion et clés Azure, les
+signatures SAS, les clés de fonction en URL, les jetons Hugging Face et GitHub,
+les identifiants AWS et les clés privées. Il **masque** ce qu'il trouve : un
+journal de build est public, et recopier une fuite en entier pour la signaler la
+rendrait pire.
+
+Deux partis pris assumés : pas de détection par entropie (les sorties d'images
+des notebooks sont du base64 et déclencheraient à chaque exécution ; une alarme
+permanente est une alarme ignorée), et des gabarits explicitement tolérés
+(`$key`, `<CLE>`, `hf_...`) pour que la documentation reste écrivable.
+`tests/test_check_secrets.py` fixe les deux côtés — 19 cas, dont un qui vérifie
+que le dépôt réel est propre.
+
+**Avant de rendre le dépôt public**, l'état courant ne suffit pas : un secret
+retiré reste lisible dans l'historique. Balayer tous les commits :
+
+```bash
+python scripts/check_secrets.py --history
+```
 
 ### `.github/workflows/train.yml` — manuel
 
