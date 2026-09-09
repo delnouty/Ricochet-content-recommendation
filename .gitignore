@@ -67,3 +67,13 @@ docs/*.nav
 docs/*.out
 docs/*.snm
 docs/*.toc
+
+# Terraform : l'état contient la chaîne de connexion en clair, le cache des
+# fournisseurs pèse des dizaines de Mo. En revanche `.terraform.lock.hcl` est
+# versionné (il épingle les empreintes des fournisseurs) — d'où l'exception.
+infra/.terraform/
+infra/*.tfstate
+infra/*.tfstate.*
+infra/*.tfvars
+infra/crash.log
+!infra/.terraform.lock.hcl
