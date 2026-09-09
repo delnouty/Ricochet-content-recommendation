@@ -73,15 +73,29 @@ MOTIFS: list[tuple[str, re.Pattern, str]] = [
      re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----"),
      "clé privée en clair"),
     ("secret nommé, avec valeur",
+     # Les guillemets sont **optionnels** : dans un fichier `.env`, la valeur
+     # n'en porte pas. Une première version les exigeait et aurait donc laissé
+     # passer un `.env` indexé par erreur — le format le plus probable pour ce
+     # genre de fuite.
      re.compile(r"(?:AZURE_STORAGE_CONNECTION_STRING|FUNCTION_KEY|HF_TOKEN|"
-                r"RECO_API_KEY)\s*[:=]\s*[\"']([^\"'\s]{16,})[\"']"),
+                r"RECO_API_KEY)\s*[:=]\s*[\"']?([^\"'\s#]{16,})[\"']?"),
      "affectation en dur d'un secret connu du projet"),
 ]
 
-# Valeurs manifestement factices : gabarits de documentation, exemples, tests.
+# Valeurs qui ne sont pas des secrets : gabarits de documentation, et
+# **références** — un secret lu depuis une variable, un attribut de ressource ou
+# un secret de CI est précisément la bonne pratique ; le signaler découragerait
+# ce qu'on veut encourager.
 GABARITS = re.compile(
-    r"^(?:<[^>]+>|\.{3}|x{3,}|hf_\.{3}|REDACTED|CHANGEME|placeholder|"
-    r"votre[-_ ].*|your[-_ ].*|mauvaise|fake|dummy|test)$", re.I)
+    r"^(?:"
+    r"<[^>]+>|\.{3}|x{3,}|hf_\.{3}|REDACTED|CHANGEME|placeholder|"
+    r"votre[-_ ].*|your[-_ ].*|mauvaise|fake|dummy|test"
+    # `azurerm_storage_account.x.primary_connection_string`, `os.environ.get`,
+    # `var.cle`, `secrets.FUNCTION_KEY` : un identifiant pointé, pas une valeur.
+    r"|[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+"
+    # `$nouveau`, `${KEY}`, `%KEY%` : substitution par le shell.
+    r"|[$%][A-Za-z0-9_{}().:]+"
+    r")$", re.I)
 
 # Fichiers dont le contenu n'est pas du texte utile à inspecter.
 EXTENSIONS_IGNOREES = {".png", ".jpg", ".jpeg", ".gif", ".pdf", ".npy", ".pkl",

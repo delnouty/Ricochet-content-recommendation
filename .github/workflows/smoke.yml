@@ -1,0 +1,49 @@
+# Vérification du service déployé : sert-il bien le modèle publié ?
+#
+# Volontairement **séparé de `ci.yml`**. Trois raisons :
+#
+#   - il a besoin d'un secret, et une pull request venue d'une copie du dépôt ne
+#     doit pas y accéder ;
+#   - il appelle un service réel : le déclencher à chaque push provoquerait des
+#     démarrages à froid inutiles ;
+#   - il ne vérifie pas le code mais le **déploiement**, ce qui n'a pas la même
+#     cadence : le code change à chaque commit, le déploiement rarement.
+#
+# À lancer après chaque déploiement, et une fois par semaine pour attraper une
+# dérive sans commit — des artefacts remplacés dans Blob sans redéploiement, par
+# exemple, ce qui est exactement l'incident que ce projet a connu.
+
+name: Smoke — service déployé
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Lundi 6 h UTC. Une exécution hebdomadaire suffit : le jeu de données est
+    # statique, les artefacts ne changent pas d'eux-mêmes. À retirer quand les
+    # ressources Azure seront supprimées, sinon ce travail échouera chaque
+    # semaine sans rien signaler d'utile.
+    - cron: "0 6 * * 1"
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    # Une copie du dépôt n'a pas les secrets : la laisser exécuter ce travail ne
+    # produirait qu'un échec permanent et trompeur.
+    if: github.repository == 'delnouty/Ricochet-content-recommendation'
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Le service sert-il le modèle de référence ?
+        # `smoke_azure.py` n'utilise que la bibliothèque standard : rien à
+        # installer. Aucun accès Azure non plus — seule la clé de fonction, qui
+        # est un ticket HTTP et non une identité.
+        env:
+          FUNCTION_URL: ${{ vars.FUNCTION_URL }}
+          FUNCTION_KEY: ${{ secrets.FUNCTION_KEY }}
+        run: python scripts/smoke_azure.py

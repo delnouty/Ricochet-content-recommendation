@@ -49,6 +49,12 @@ A_DETECTER = [
     ("identifiant AWS", _AWS),
     ("clé privée", _PRIVEE),
     ("secret nommé en dur", f'FUNCTION_KEY = "{CLE_FACTICE}"'),
+    # Format `.env` : pas de guillemets. C'est la forme la plus probable d'une
+    # fuite accidentelle, et une première version du détecteur exigeait les
+    # guillemets — elle serait passée à côté.
+    ("secret nommé, format .env", f"FUNCTION_KEY={CLE_FACTICE}"),
+    ("chaîne de connexion en .env",
+     "AZURE_STORAGE_CONNECTION_STRING=" + _COMPTE),
     ("signature SAS", _SAS),
 ]
 
@@ -61,6 +67,21 @@ A_IGNORER = [
     ("nom de variable seul", "définir AZURE_STORAGE_CONNECTION_STRING avant de lancer"),
     ("commande az sans valeur",
      "az functionapp function keys list --query default -o tsv"),
+    # Ces trois formes vivent dans `.env.example`, les workflows et la doc :
+    # les signaler rendrait la vérification inutilisable.
+    ("gabarit .env", "FUNCTION_KEY=<votre-cle-de-fonction>"),
+    ("valeur vide en .env", "FUNCTION_KEY="),
+    ("substitution GitHub Actions", "FUNCTION_KEY: ${{ secrets.FUNCTION_KEY }}"),
+    ("affectation depuis une variable", "FUNCTION_KEY = $nouveau"),
+    # Une référence Terraform est la **bonne** pratique : le secret est lu comme
+    # attribut de la ressource et n'existe nulle part en clair. Le détecteur l'a
+    # signalée quand les guillemets sont devenus optionnels ; découragerait
+    # exactement ce qu'on veut voir.
+    ("référence Terraform",
+     "AZURE_STORAGE_CONNECTION_STRING = "
+     "azurerm_storage_account.ricochet.primary_connection_string"),
+    ("lecture depuis l'environnement",
+     'FUNCTION_KEY = os.environ.get'),
 ]
 
 
