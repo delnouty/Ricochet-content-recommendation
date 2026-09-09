@@ -1,30 +1,30 @@
 output "endpoint" {
-  description = "URL de l'endpoint de recommandation."
+  description = "URL of the recommendation endpoint."
   value       = "https://${azurerm_function_app_flex_consumption.ricochet.default_hostname}/api/recommend"
 }
 
 output "function_app_name" {
-  description = "Nom de la Function, pour `func azure functionapp publish`."
+  description = "Function name, for `func azure functionapp publish`."
   value       = azurerm_function_app_flex_consumption.ricochet.name
 }
 
 output "storage_account_name" {
-  description = "Compte de stockage, pour `az storage blob upload-batch`."
+  description = "Storage account, for `az storage blob upload-batch`."
   value       = azurerm_storage_account.ricochet.name
 }
 
 output "models_container_name" {
-  description = "Conteneur où téléverser les 22 artefacts."
+  description = "Container the 22 artifacts are uploaded to."
   value       = azurerm_storage_container.models.name
 }
 
-# La chaîne de connexion est un secret : marquée `sensitive`, elle n'apparaît
-# pas dans la sortie de `terraform apply`. Pour la lire délibérément :
+# The connection string is a secret: marked `sensitive`, it does not appear in
+# the output of `terraform apply`. To read it deliberately:
 #   terraform output -raw storage_connection_string
-# Rappel : elle reste en clair dans le fichier d'état, ce qui est une raison de
-# passer à un état distant chiffré dès que le projet sort de la démonstration.
+# Remember that it stays in clear text in the state file, which is one reason to
+# move to an encrypted remote state as soon as this leaves demonstration.
 output "storage_connection_string" {
-  description = "Chaîne de connexion du compte de stockage (secret)."
+  description = "Connection string of the storage account (secret)."
   value       = azurerm_storage_account.ricochet.primary_connection_string
   sensitive   = true
 }

@@ -1,101 +1,100 @@
-# Ricochet — solution locale autonome
+# Ricochet — the standalone local solution
 
-Troisième solution de déploiement du dépôt, **indépendante des deux autres** et
-**sans aucun service cloud** : l'application Streamlit embarque le moteur de
-recommandation et calcule le top-N dans son propre processus.
+The repository's third deployment, **independent of the other two** and using
+**no cloud service at all**: the Streamlit app embeds the recommendation engine
+and computes the top-N inside its own process.
 
 ```
 Streamlit (local/app.py)
-   └── Recommender (local/recommender.py)  ──lit──▶  models/*.npy, *.pkl
-        aucun HTTP · aucun SDK Azure · aucun HF Hub
+   └── Recommender (local/recommender.py)  ──reads──▶  models/*.npy, *.pkl
+        no HTTP · no Azure SDK · no HF Hub
 ```
 
-Comparaison avec les deux autres solutions :
+Compared with the other two solutions:
 
-| Solution | Service | Artefacts | Dépendances |
+| Solution | Service | Artifacts | Dependencies |
 |---|---|---|---|
 | `azure_function/` + `app/` | Azure Function (HTTP) | Blob Storage | `azure-functions`, `azure-storage-blob`, `requests` |
-| `spaces/` | Hugging Face Space | dépôt de modèle HF Hub | `huggingface_hub` |
-| **`local/`** | **aucun — tout en processus** | **dossier du disque** | **`streamlit`, `numpy`** |
+| `spaces/` | Hugging Face Space | HF Hub model repository | `huggingface_hub` |
+| **`local/`** | **none — all in process** | **a directory on disk** | **`streamlit`, `numpy`** |
 
-## Lancement
+## Running it
 
-Depuis la racine du dépôt :
+From the repository root:
 
 ```powershell
 pip install -r local/requirements.txt
 streamlit run local/app.py
 ```
 
-Aucune configuration n'est nécessaire si `models/` est présent à la racine.
+No configuration is needed as long as `models/` is present at the root.
 
-## Inscrire un client et le recommander
+## Registering a reader and recommending to them
 
-Onglet **Nouveau client** : nom + centres d'intérêt (catégories) → le client reçoit
-un `user_id` (à partir de 1 000 000) et un profil de départ constitué des articles
-les plus récents de ces catégories.
+**New reader** tab: a name plus interests (categories) — the reader is given a
+`user_id` (from 1 000 000 up) and a starting profile made of the most recent
+articles in those categories.
 
-Onglet **Recommandations** : sélectionnez-le, puis le bouton **Lu** en face d'une
-recommandation enregistre la lecture. Le profil s'enrichit, les recommandations
-changent — sans aucun ré-entraînement, le content-based n'ayant besoin que d'un
-historique.
+**Recommendations** tab: select them, then the **Read** button next to a
+recommendation records the read. The profile grows, the recommendations change —
+with no re-training at all, since the content-based model needs nothing but a
+history.
 
-Les clients et leurs lectures sont stockés dans `local/clients.db` (SQLite,
-bibliothèque standard), donc ils survivent au redémarrage. Ce fichier n'est pas
-versionné.
+Readers and their reads are stored in `local/clients.db` (SQLite, standard
+library), so they survive a restart. That file is not versioned.
 
-Un client inscrit est **absent des facteurs ALS** : le collaboratif l'ignore et
-retombe sur le contenu jusqu'au prochain ré-entraînement (`src/prepare_model.py`).
-L'application l'indique explicitement.
+A registered reader is **absent from the ALS factors**: the collaborative model
+ignores them and falls back to content until the next re-training
+(`src/prepare_model.py`). The app says so explicitly.
 
-## Configuration optionnelle
+## Optional configuration
 
-| Variable | Rôle | Défaut |
+| Variable | Role | Default |
 |---|---|---|
-| `MODELS_DIR` | dossier des artefacts | `../models`, puis `./models` |
-| `DATA_DIR` | dossier contenant `articles_metadata.csv`, pour afficher catégorie / longueur / date de publication | `data/raw/`, puis `data/news-portal-user/` |
-| `CLIENTS_DB` | base SQLite des clients inscrits | `local/clients.db` |
+| `MODELS_DIR` | artifact directory | `../models`, then `./models` |
+| `DATA_DIR` | directory holding `articles_metadata.csv`, to show category / length / publication date | `data/raw/`, then `data/news-portal-user/` |
+| `CLIENTS_DB` | SQLite database of registered readers | `local/clients.db` |
 
-Sans `articles_metadata.csv`, l'application affiche les identifiants d'articles :
-c'est un enrichissement d'affichage, pas une dépendance.
+Without `articles_metadata.csv` the app shows article identifiers: this is a
+display enrichment, not a dependency.
 
 ```powershell
 $env:MODELS_DIR = "D:\artefacts\ricochet"
 streamlit run local/app.py
 ```
 
-## Utiliser ce dossier hors du dépôt
+## Using this directory outside the repository
 
-`local/` est autoportant. Pour l'exécuter ailleurs, copiez le dossier et placez
-les artefacts à côté :
+`local/` is self-contained. To run it elsewhere, copy the directory and put the
+artifacts next to it:
 
 ```
-mon-deploiement/
+my-deployment/
 ├── app.py
 ├── recommender.py
 ├── requirements.txt
-└── models/            <- les 7 fichiers générés par src/prepare_model.py
+└── models/            <- the files generated by src/prepare_model.py
 ```
 
 ```powershell
-cd mon-deploiement
+cd my-deployment
 pip install -r requirements.txt
 $env:MODELS_DIR = "models"
 streamlit run app.py
 ```
 
-## Fichiers
+## Files
 
-- `app.py` — application Streamlit autonome (sélection d'utilisateur, historique de
-  lecture, top-N, mode cold start).
-- `recommender.py` — copie du cœur de reco. **Généré** : la source de vérité est
-  `src/recommender.py`. Après toute modification de celle-ci :
+- `app.py` — the standalone Streamlit app: reader selection, reading history,
+  top-N, cold-start mode.
+- `recommender.py` — a copy of the recommendation core. **Generated**: the source
+  of truth is `src/recommender.py`. After any change to it, run
   `python scripts/sync_recommender.py`.
-- `requirements.txt` — `streamlit` + `numpy`, rien d'autre.
+- `requirements.txt` — `streamlit` and `numpy`, nothing else.
 
-## Ce que cette solution n'est pas
+## What this solution is not
 
-Une démo mono-utilisateur, pas un service : pas d'authentification, pas de montée
-en charge, pas de mise à jour d'artefacts à chaud. Les artefacts sont chargés une
-fois au démarrage (`st.cache_resource`) ; pour les régénérer, relancez
-`src/prepare_model.py` puis l'application.
+It is a single-user demo, not a service: no authentication, no scaling, no hot
+artifact reload. The artifacts are loaded once at start-up
+(`st.cache_resource`); to regenerate them, re-run `src/prepare_model.py` and then
+the app.

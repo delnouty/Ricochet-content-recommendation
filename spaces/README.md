@@ -1,5 +1,5 @@
 ---
-title: Ricochet - Recommandation d'articles
+title: Ricochet - Article recommendation
 emoji: 🎯
 colorFrom: blue
 colorTo: indigo
@@ -8,99 +8,99 @@ app_port: 7860
 pinned: false
 ---
 
-# Ricochet — démonstration publique (Hugging Face Space)
+# Ricochet — public demo (Hugging Face Space)
 
-Solution **autonome**, indépendante de la solution Azure : l'application embarque le
-moteur de recommandation et calcule elle-même les suggestions. Les artefacts sont
-téléchargés au démarrage depuis un **dépôt de modèle HF Hub**.
+A **self-contained** solution, independent of the Azure one: the app embeds the
+recommendation engine and computes the suggestions itself. The artifacts are
+downloaded at start-up from an **HF Hub model repository**.
 
 ```
-HF Space (Streamlit + Recommender)  ──charge──▶  HF Hub (dépôt de modèle)
-        calcule les recommandations sur place
+HF Space (Streamlit + Recommender)  ──loads──▶  HF Hub (model repository)
+        computes the recommendations in place
 ```
 
-L'interface est **la même que la solution locale** : elle vient de `ui.py`, copie
-générée depuis `src/app_ui.py` par `scripts/sync_recommender.py`. Les deux solutions
-ne peuvent donc pas diverger, et la CI le vérifie (`--check`).
+The interface is **the same as the local solution's**: it comes from `ui.py`, a
+copy generated from `src/app_ui.py` by `scripts/sync_recommender.py`. The two
+therefore cannot drift apart, and CI checks it (`--check`).
 
-## Ce que la démo expose
+## What the demo exposes
 
-| Onglet | Contenu |
+| Tab | Content |
 |---|---|
-| Recommandations | 5 stratégies — celle de production (4 populaires 1 h + 1 contenu), puis contenu, ALS, **SVD Surprise** et hybride pour comparaison ; filtre de fraîcheur, étoiles |
-| Parcourir les articles | catalogue complet, 4 tris, filtre par note |
-| Nouveau client | inscription, région, profil initial |
+| Recommendations | 5 strategies — the production one (4 popular over 1 h + 1 content), then content, ALS, **SVD Surprise** and hybrid for comparison; freshness filter, stars |
+| Browse articles | the full catalogue, 4 sort orders, filter by rating |
+| New reader | sign-up, region, initial profile |
 
-## Deux limites propres à l'hébergement
+## Two limits that come from the hosting
 
-**Les clients inscrits sont temporaires.** Un Space est éphémère : la base SQLite vit
-dans `/tmp`, elle est perdue à chaque redémarrage et **partagée entre tous les
-visiteurs**. L'application l'affiche en bannière. N'y saisir aucune donnée personnelle.
+**Registered readers are temporary.** A Space is ephemeral: the SQLite database
+lives in `/tmp`, it is lost on every restart and it is **shared between all
+visitors**. The app shows this as a banner. Do not enter any personal data.
 
-**Les artefacts de fraîcheur périment.** Le vivier d'articles récents est figé au
-moment de la publication. Sur des données réelles il faudrait le republier
-régulièrement (voir `docs/architecture.md` §4.f) ; ici les données sont statiques, la
-démonstration reste donc représentative.
+**The freshness artifacts go stale.** The pool of recent articles is frozen at
+publication time. On real data it would have to be republished regularly (see
+`docs/architecture.md` § 4.f); here the dataset is static, so the demonstration
+stays representative.
 
-## Publier / mettre à jour
+## Publishing and updating
 
 ```bash
-# 1. générer les artefacts (depuis le dépôt principal)
+# 1. generate the artifacts (from the main repository)
 python -m src.prepare_model --data-dir data/news-portal-user --out-dir models
 python -m src.collaborative_surprise --data-dir data/news-portal-user --out-dir models
 
-# 2. publier les artefacts sur le HF Hub (~253 Mo, 22 fichiers)
+# 2. publish the artifacts to HF Hub (about 253 MB, 22 files)
 pip install huggingface_hub
-$env:HF_TOKEN = "hf_..."        # PowerShell ; export HF_TOKEN=... sous bash
-python spaces/upload_artifacts.py --repo <compte>/ricochet-models --models-dir models
+$env:HF_TOKEN = "hf_..."        # PowerShell; export HF_TOKEN=... under bash
+python spaces/upload_artifacts.py --repo <account>/ricochet-models --models-dir models
 
-# 3. créer le Space — SDK « docker », voir la note ci-dessous
-python -c "from huggingface_hub import HfApi; HfApi().create_repo('<compte>/ricochet', repo_type='space', space_sdk='docker', exist_ok=True)"
+# 3. create the Space — SDK "docker", see the note below
+python -c "from huggingface_hub import HfApi; HfApi().create_repo('<account>/ricochet', repo_type='space', space_sdk='docker', exist_ok=True)"
 
-# 4. pousser le Space (hf remplace huggingface-cli depuis la version 0.34)
-hf upload <compte>/ricochet spaces/ . --repo-type space --exclude "__pycache__/*"
+# 4. push the Space (hf replaces huggingface-cli as of version 0.34)
+hf upload <account>/ricochet spaces/ . --repo-type space --exclude "__pycache__/*"
 ```
 
-**Pourquoi Docker et non Streamlit.** Hugging Face a retiré `streamlit` de ses SDK
-intégrés : la création d'un Space n'accepte plus que `gradio`, `docker` ou
-`static`, et une tentative avec `space_sdk="streamlit"` est refusée par l'API
-(`Invalid option: expected one of "gradio"|"docker"|"static" at sdk`). Les
-applications Streamlit passent donc par le SDK Docker — voir le `Dockerfile` de ce
-dossier, qui suit les contraintes de la plateforme (utilisateur d'UID 1000, port
-7860).
+**Why Docker and not Streamlit.** Hugging Face has removed `streamlit` from its
+built-in SDKs: creating a Space now only accepts `gradio`, `docker` or `static`,
+and an attempt with `space_sdk="streamlit"` is rejected by the API
+(`Invalid option: expected one of "gradio"|"docker"|"static" at sdk`). Streamlit
+apps therefore go through the Docker SDK — see the `Dockerfile` in this
+directory, which follows the platform's constraints (UID 1000 user, port 7860).
 
-Puis, **avant le premier démarrage**, définir la variable `HF_MODEL_REPO` du Space
-(*Settings → Variables and secrets*) : sans elle, `model_loader.ensure_models()`
-lève une erreur explicite plutôt que de deviner un dépôt.
+Then, **before the first start-up**, set the Space variable `HF_MODEL_REPO`
+(*Settings → Variables and secrets*): without it,
+`model_loader.ensure_models()` raises an explicit error rather than guessing a
+repository.
 
-## Secrets et variables du Space
+## Space secrets and variables
 
 *Settings → Variables and secrets*
 
-| Nom | Type | Rôle |
+| Name | Type | Role |
 |-----|------|------|
-| `HF_MODEL_REPO` | variable | id du dépôt de modèle (ex. `<org>/ricochet-models`) |
-| `HF_TOKEN` | secret | requis uniquement si le dépôt de modèle est privé |
-| `CLIENTS_DB` | variable | facultatif : chemin de la base clients (défaut `/tmp/clients.db`) |
+| `HF_MODEL_REPO` | variable | id of the model repository (e.g. `<org>/ricochet-models`) |
+| `HF_TOKEN` | secret | only required if the model repository is private |
+| `CLIENTS_DB` | variable | optional: path to the reader database (default `/tmp/clients.db`) |
 
-## Tester en local, sans passer par le Hub
+## Testing locally, without going through the Hub
 
 ```bash
 pip install -r spaces/requirements.txt
 MODELS_DIR=models streamlit run spaces/app.py
 ```
 
-## Fichiers
+## Files
 
-| Fichier | Rôle |
+| File | Role |
 |---|---|
-| `Dockerfile` | image du Space (SDK Docker : Streamlit n'est plus un SDK intégré) |
-| `app.py` | point d'entrée : télécharge les artefacts, appelle `ui.run()` |
-| `ui.py` | **généré** — interface commune (source : `src/app_ui.py`) |
-| `recommender.py` | **généré** — cœur de reco (source : `src/recommender.py`) |
-| `user_store.py` | **généré** — clients inscrits (source : `src/user_store.py`) |
-| `model_loader.py` | téléchargement des artefacts depuis le HF Hub |
-| `upload_artifacts.py` | publication des artefacts vers le HF Hub |
+| `Dockerfile` | the Space image (Docker SDK: Streamlit is no longer a built-in SDK) |
+| `app.py` | entry point: downloads the artifacts, then calls `ui.run()` |
+| `ui.py` | **generated** — the shared interface (source: `src/app_ui.py`) |
+| `recommender.py` | **generated** — the recommendation core (source: `src/recommender.py`) |
+| `user_store.py` | **generated** — registered readers (source: `src/user_store.py`) |
+| `model_loader.py` | downloads the artifacts from HF Hub |
+| `upload_artifacts.py` | publishes the artifacts to HF Hub |
 
-Les fichiers marqués **généré** ne doivent pas être édités : lancer
-`python scripts/sync_recommender.py` après toute modification de `src/`.
+Files marked **generated** must not be edited: run
+`python scripts/sync_recommender.py` after any change under `src/`.

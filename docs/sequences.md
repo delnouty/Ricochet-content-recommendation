@@ -1,202 +1,201 @@
-# Diagrammes de séquence — les trois solutions
+# Sequence diagrams — the three solutions
 
-Une requête de recommandation, de bout en bout, dans chacun des trois
-déploiements. Les diagrammes suivent le code (`azure_function/function_app.py`,
-`spaces/app.py`, `local/app.py`, `src/app_ui.py`) et non une intention : les noms
-de méthodes sont ceux qui existent.
+One recommendation request, end to end, in each of the three deployments. The
+diagrams follow the code (`azure_function/function_app.py`, `spaces/app.py`,
+`local/app.py`, `src/app_ui.py`) rather than an intention: the method names are
+the ones that actually exist.
 
-Ce que ces trois séquences font ressortir, et qui n'apparaît pas sur un schéma de
-composants :
+What these three sequences bring out, and a component diagram cannot:
 
-- **où le calcul a lieu** — dans le processus de l'interface (local, Hugging Face)
-  ou derrière un appel réseau (Azure) ;
-- **ce que coûte un démarrage à froid** et ce qu'il ne coûte qu'une fois ;
-- **comment un lecteur inscrit à l'instant est recommandé** par un service qui ne
-  le connaît pas.
+- **where the computation happens** — inside the UI process (local, Hugging
+  Face) or behind a network call (Azure);
+- **what a cold start costs**, and what it only costs once;
+- **how a reader who signed up a second ago** gets recommendations from a
+  service that has never heard of them.
 
-Le cœur de recommandation est le même partout (`src/recommender.py`, numpy seul) ;
-les copies déployées sont générées et la CI le vérifie.
+The recommendation core is the same everywhere (`src/recommender.py`, numpy
+only); the deployed copies are generated, and CI checks that they match.
 
 ---
 
-## 1. Solution locale — tout dans un processus
+## 1. Local — everything in one process
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor U as Utilisateur
+    actor U as Reader
     participant ST as Streamlit<br/>local/app.py
-    participant UI as ui.run<br/>(copie de src/app_ui.py)
+    participant UI as ui.run<br/>(copy of src/app_ui.py)
     participant DB as SQLite<br/>local/clients.db
-    participant FS as Disque<br/>models/
+    participant FS as Disk<br/>models/
     participant R as Recommender<br/>(numpy)
 
     U->>ST: streamlit run local/app.py
     ST->>ST: resolve_models_dir()
-    Note over ST: cherche $MODELS_DIR, puis ../models, puis ./models
+    Note over ST: tries $MODELS_DIR, then ../models, then ./models
     ST->>UI: run(models_dir, clients_db)
 
     rect rgb(240, 246, 250)
-    Note over UI,R: Démarrage à froid — une seule fois (st.cache_resource)
+    Note over UI,R: Cold start — once only (st.cache_resource)
     UI->>R: Recommender(models_dir)
-    R->>FS: lecture des 22 artefacts (253 Mo)
-    FS-->>R: tableaux numpy et dictionnaires
+    R->>FS: read the 22 artifacts (253 MB)
+    FS-->>R: numpy arrays and dictionaries
     UI->>DB: UserStore(clients_db)
     UI->>DB: all_histories()
     DB-->>UI: {user_id: [article_id]}
     UI->>R: sync_store_into_model()
-    Note over R: les clients inscrits entrent dans user_clicks,<br/>donc le contenu les prend en compte sans ré-entraînement
+    Note over R: readers who signed up enter user_clicks,<br/>so the content model uses them with no re-training
     end
 
-    U->>UI: choisit un lecteur, une stratégie, clique « Recommander »
+    U->>UI: picks a reader and a strategy, clicks "Recommend"
     UI->>R: recommend(user_id, n=5, method="mix", fresh_only=True)
-    R->>R: vivier de fraîcheur, puis classement
+    R->>R: freshness candidate pool, then ranking
     R-->>UI: [5 article_id]
-    UI-->>U: 5 lignes, avec étoiles et nombre de lecteurs
+    UI-->>U: 5 rows, with stars and reader counts
 
-    opt L'utilisateur marque un article comme lu
+    opt The reader marks an article as read
     UI->>DB: add_read(user_id, article_id)
-    UI->>R: user_clicks[user_id] mis à jour
-    Note over UI: la recommandation suivante change,<br/>sans ré-entraînement ni redéploiement
+    UI->>R: user_clicks[user_id] updated
+    Note over UI: the next recommendation changes,<br/>with no re-training and no redeployment
     end
 ```
 
-**Ce que montre ce diagramme** : aucun appel réseau, et le modèle vit dans le
-processus de l'interface. C'est la solution qui fonctionne dans un train, et celle
-qui sert de référence de correction pour les deux autres (étape 2 du tutoriel de
-déploiement).
+**What this diagram shows**: no network call at all, and the model living inside
+the UI process. This is the solution that works on a train, and the one used as
+the correctness reference for the other two (step 2 of the deployment tutorial).
 
 ---
 
-## 2. Solution Hugging Face — même code, artefacts distants
+## 2. Hugging Face — same code, remote artifacts
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor V as Visiteur
-    participant SP as Space (SDK Docker)<br/>spaces/app.py
+    actor V as Visitor
+    participant SP as Space (Docker SDK)<br/>spaces/app.py
     participant ML as model_loader
     participant HUB as HF Hub<br/>DaryaEL/ricochet-models
-    participant UI as ui.run<br/>(copie de src/app_ui.py)
-    participant DB as SQLite /tmp<br/>(éphémère)
+    participant UI as ui.run<br/>(copy of src/app_ui.py)
+    participant DB as SQLite in /tmp<br/>(ephemeral)
     participant R as Recommender<br/>(numpy)
 
-    Note over SP: image construite par le Dockerfile,<br/>Streamlit n'est plus un SDK intégré
+    Note over SP: image built by the Dockerfile,<br/>Streamlit is no longer a built-in SDK
 
-    V->>SP: ouvre https://daryael-ricochet.hf.space
+    V->>SP: opens https://daryael-ricochet.hf.space
     SP->>ML: ensure_models()
-    alt MODELS_DIR défini (test local)
-        ML-->>SP: dossier local
-    else HF_MODEL_REPO défini (Space)
+    alt MODELS_DIR set (local test)
+        ML-->>SP: local directory
+    else HF_MODEL_REPO set (the Space)
         ML->>HUB: snapshot_download(*.npy, *.pkl, recent_window.json)
-        HUB-->>ML: 253 Mo dans le cache huggingface_hub
-        ML-->>SP: chemin du cache
-    else aucune des deux
-        ML-->>SP: RuntimeError explicite
-        Note over ML,SP: échouer en le disant, plutôt que de deviner un dépôt
+        HUB-->>ML: 253 MB into the huggingface_hub cache
+        ML-->>SP: path to the cache
+    else neither is set
+        ML-->>SP: explicit RuntimeError
+        Note over ML,SP: fail and say so, rather than guess a repository
     end
 
-    SP->>DB: open_store() → SQLite dans /tmp
-    Note over DB: un Space est éphémère : la base est perdue au redémarrage<br/>et partagée entre visiteurs → bannière d'avertissement
-    SP->>UI: run(models_dir, clients_db, banniere, store)
+    SP->>DB: open_store() -> SQLite in /tmp
+    Note over DB: a Space is ephemeral: the database is lost on restart<br/>and shared between visitors -> warning banner
+    SP->>UI: run(models_dir, clients_db, banner, store)
     UI->>R: Recommender(models_dir)
 
-    V->>UI: clique « Recommander »
+    V->>UI: clicks "Recommend"
     UI->>R: recommend(user_id, n=5, method="mix")
     R-->>UI: [5 article_id]
-    UI-->>V: 5 lignes
+    UI-->>V: 5 rows
 
-    opt Secret AZURE_STORAGE_CONNECTION_STRING présent
-    Note over DB: open_store() choisit Azure Table Storage :<br/>les clients survivent aux redémarrages, la bannière change
+    opt Secret AZURE_STORAGE_CONNECTION_STRING present
+    Note over DB: open_store() picks Azure Table Storage instead:<br/>readers survive restarts, and the banner changes
     end
 ```
 
-**Ce que montre ce diagramme** : la seule différence avec la solution locale est
-l'origine des artefacts. Le calcul reste dans le processus du Space — aucun appel
-à Azure, les deux solutions sont indépendantes. Le disque n'étant pas persistant,
-les 253 Mo sont retéléchargés à chaque démarrage à froid.
+**What this diagram shows**: the only difference from the local solution is where
+the artifacts come from. The computation stays inside the Space process — no call
+to Azure, the two solutions are independent. Since the disk is not persistent,
+the 253 MB are downloaded again on every cold start.
 
 ---
 
-## 3. Solution Azure — architecture 2, calcul derrière le réseau
+## 3. Azure — architecture 2, computation behind the network
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor U as Utilisateur
+    actor U as Reader
     participant APP as app/app_full.py<br/>(Streamlit)
     participant TS as Azure Table Storage<br/>ricochetclients / ricochetreads
     participant AR as ApiRecommender<br/>(app/api_client.py)
     participant FN as Azure Function<br/>/api/recommend
-    participant BL as Blob Storage<br/>conteneur models
-    participant R as Recommender<br/>(dans la Function)
+    participant BL as Blob Storage<br/>container models
+    participant R as Recommender<br/>(inside the Function)
 
-    U->>APP: ouvre l'application
+    U->>APP: opens the application
     APP->>TS: list_clients(), all_histories()
-    TS-->>APP: clients inscrits et leurs lectures
-    APP->>AR: artefacts légers (36 Mo : historiques, étoiles, popularité)
-    Note over AR: pas d'embeddings côté client :<br/>seul le service en a besoin pour calculer
+    TS-->>APP: registered readers and their reads
+    APP->>AR: light artifacts (36 MB: histories, stars, popularity)
+    Note over AR: no embeddings on the client side:<br/>only the service needs them to compute
 
-    U->>APP: clique « Recommander »
+    U->>APP: clicks "Recommend"
     APP->>AR: recommend(user_id, n, method, region, fresh_only)
-    opt user_id >= 1 000 000 (client inscrit dans l'application)
-    AR->>AR: history = lectures du client
-    Note over AR: transmis en paramètre : le service est sans état<br/>et ne connaît pas ce lecteur
+    opt user_id >= 1 000 000 (reader registered in the app)
+    AR->>AR: history = that reader's reads
+    Note over AR: passed as a parameter: the service is stateless<br/>and has never seen this reader
     end
     AR->>FN: GET /api/recommend — user_id, n, method, region, fresh_only, history, code
 
     rect rgb(250, 245, 235)
-    Note over FN,BL: Bindings — à CHAQUE invocation, ~2 ms
-    BL-->>FN: popular_recent.npy, candidates_recent.npy, recent_window.json (23 Ko)
+    Note over FN,BL: Bindings — on EVERY invocation, about 2 ms
+    BL-->>FN: popular_recent.npy, candidates_recent.npy, recent_window.json (23 kB)
     end
 
-    alt Démarrage à froid (première invocation de l'instance)
-        FN->>BL: ensure_models() — énumère le conteneur
-        BL-->>FN: 22 artefacts, 253 Mo vers /tmp
-        Note over FN,BL: validité du cache jugée sur taille ET date du blob
+    alt Cold start (first invocation on this instance)
+        FN->>BL: ensure_models() — enumerates the container
+        BL-->>FN: 22 artifacts, 253 MB into /tmp
+        Note over FN,BL: cache validity judged on size AND blob date
         FN->>R: Recommender(models_dir)
-    else Invocation à chaud
-        FN->>R: instance en cache (variable globale)
+    else Warm invocation
+        FN->>R: instance already cached (module global)
     end
 
     FN->>R: set_freshness(popular_recent, candidates_recent, window)
-    Note over FN,R: une lecture de binding qui échoue est journalisée,<br/>le moteur garde la fenêtre du démarrage — pas d'erreur 500
+    Note over FN,R: a failed binding read is logged and the engine keeps<br/>the window it started with — no HTTP 500
     FN->>R: recommend(user_id, n, method, region, fresh_only, history)
     R-->>FN: [5 article_id]
     FN-->>AR: 200 {"user_id", "method", "recommendations"}
-    AR-->>APP: [5 article_id] + latence mesurée
-    APP-->>U: 5 lignes
+    AR-->>APP: [5 article_id] plus the measured latency
+    APP-->>U: 5 rows
 
-    opt L'utilisateur marque un article comme lu
+    opt The reader marks an article as read
     APP->>TS: add_read(user_id, article_id)
-    Note over TS: PartitionKey = lecteur → l'historique se lit<br/>en une requête de partition
+    Note over TS: PartitionKey = reader, so a history is one<br/>partition query
     end
 ```
 
-**Ce que montre ce diagramme** : les deux accès à Blob Storage, et pourquoi ils ne
-sont pas au même endroit. Les 23 Ko de fraîcheur passent par des *bindings* relus à
-chaque appel — une nouvelle fenêtre horaire s'applique **sans redémarrage**. Les
-253 Mo passent par le SDK avec cache : un binding coûterait 8 s par appel au lieu
-de 0,2 s.
+**What this diagram shows**: the two ways into Blob Storage, and why they are not
+in the same place. The 23 kB of freshness go through *bindings* that are re-read
+on every call, so a new hourly window applies **without a restart**. The 253 MB
+go through the SDK with a cache: a binding there would cost 8 s per call instead
+of 0.2 s.
 
-Le paramètre `history` est ce qui rend le service utilisable pour un lecteur
-inscrit une seconde plus tôt : la Function n'a aucun état, l'appelant apporte le
-profil.
+The `history` parameter is what makes the service usable for a reader who signed
+up one second earlier: the Function holds no state, so the caller brings the
+profile with it.
 
 ---
 
-## Comparaison des trois séquences
+## The three sequences compared
 
-| | Locale | Hugging Face | Azure |
+| | Local | Hugging Face | Azure |
 |---|---|---|---|
-| Où le classement est calculé | processus de l'interface | processus du Space | Azure Function |
-| Origine des artefacts | disque | HF Hub (téléchargés au démarrage) | Blob Storage (binding + cache) |
-| Appels réseau par recommandation | 0 | 0 | 1 |
-| Clients inscrits | SQLite persistant | SQLite `/tmp`, éphémère | Table Storage, persistant |
-| Coût du démarrage à froid | lecture disque | 253 Mo téléchargés | 253 Mo téléchargés, ~7,5 s |
-| Recommandation à chaud | immédiate | immédiate | ~0,2 s |
-| Mise à jour de la fenêtre de fraîcheur | régénérer les artefacts | republier le dépôt de modèle | **immédiate**, sans redémarrage |
+| Where ranking is computed | UI process | Space process | Azure Function |
+| Where artifacts come from | disk | HF Hub (downloaded at start-up) | Blob Storage (binding + cache) |
+| Network calls per recommendation | 0 | 0 | 1 |
+| Registered readers | persistent SQLite | SQLite in `/tmp`, ephemeral | Table Storage, persistent |
+| Cold-start cost | disk read | 253 MB downloaded | 253 MB downloaded, about 7.5 s |
+| Warm recommendation | immediate | immediate | about 0.2 s |
+| Updating the freshness window | regenerate the artifacts | republish the model repository | **immediate**, no restart |
 
-Le tableau se lit dans un sens : plus on va vers Azure, plus le modèle est loin de
-l'interface — et plus l'exploitation devient possible (mise à jour de la fraîcheur
-sans interruption, mise à l'échelle, un seul modèle pour plusieurs clients).
+The table reads in one direction: the closer you get to Azure, the further the
+model sits from the interface — and the more operable the whole thing becomes.
+Freshness updated without an interruption, scaling, and one model serving several
+clients.
