@@ -51,14 +51,33 @@ variable "models_container_name" {
   default     = "models"
 }
 
+variable "service_plan_name" {
+  description = <<-EOT
+    Nom du plan. Le défaut est celui **réellement en place** : `az functionapp
+    create` attribue un nom automatique (`ASP-<groupe>-<suffixe>`) au lieu du
+    nom que l'on aurait choisi. Le relever avant tout `terraform import`, sinon
+    le plan proposera de créer un second plan à côté de l'existant :
+
+        az appservice plan list -g rg-ricochet --query "[].name" -o tsv
+  EOT
+  type        = string
+  default     = "ASP-rgricochet-d9cf"
+}
+
 variable "maximum_instance_count" {
   description = <<-EOT
-    Plafond d'instances simultanées. 40 est le défaut d'Azure ; pour une
-    démonstration, une valeur basse borne aussi la facture en cas d'appels
-    répétés. Chaque instance retélécharge 253 Mo à son démarrage à froid.
+    Plafond d'instances simultanées. Le défaut est celui de l'environnement en
+    place, relevé avec :
+
+        az resource show -g rg-ricochet -n func-ricochet-darya \
+          --resource-type "Microsoft.Web/sites" \
+          --query properties.functionAppConfig.scaleAndConcurrency
+
+    Chaque instance retélécharge 253 Mo à son démarrage à froid : abaisser cette
+    valeur borne aussi la facture en cas d'appels répétés.
   EOT
   type        = number
-  default     = 40
+  default     = 100
 
   validation {
     condition     = var.maximum_instance_count >= 1 && var.maximum_instance_count <= 1000

@@ -83,15 +83,37 @@ Ce dernier `plan` est le seul contrôle qui vaille : s'il propose des
 modifications, c'est que cette configuration ne décrit pas fidèlement la pile,
 et il faut corriger le code — pas l'infrastructure.
 
-Deux écarts sont attendus, et normaux :
+Deux valeurs ont été relevées sur l'environnement réel et sont désormais les
+défauts — elles n'auraient pas été devinées :
 
-- **le nom du plan.** Créé par `az functionapp create`, il porte un nom
-  attribué automatiquement, probablement différent de `plan-func-ricochet-darya`.
-  Relever le vrai nom (`az functionapp show --query appServicePlanId`) et
-  ajuster la ressource avant d'importer.
-- **le conteneur `deployments`.** Il n'existe peut-être pas : `func publish`
-  utilise le conteneur que la Function a reçu à sa création. Le relever, ou
-  laisser Terraform le créer et reconfigurer la Function.
+| Variable | Valeur | Comment elle a été trouvée |
+|---|---|---|
+| `service_plan_name` | `ASP-rgricochet-d9cf` | `az functionapp create` attribue un nom automatique ; un nom déduit du nom de la Function aurait créé un plan en double |
+| `maximum_instance_count` | 100 | le défaut supposé (40) était faux |
+
+Un écart reste attendu : **le conteneur `deployments`** n'existe peut-être pas —
+`func publish` utilise le conteneur que la Function a reçu à sa création. Le
+relever, ou laisser Terraform le créer et reconfigurer la Function.
+
+### Relever la configuration réelle
+
+⚠️ `az functionapp show --query "{etat:state}"` renvoie **`null`** pour une
+application sur plan Flex Consumption : les propriétés vivent sous
+`functionAppConfig`, que ce chemin ne traverse pas. Passer par l'API générique :
+
+```bash
+az appservice plan list -g rg-ricochet \
+  --query "[].{nom:name, sku:sku.name, niveau:sku.tier}" -o table
+
+az resource show -g rg-ricochet -n func-ricochet-darya \
+  --resource-type "Microsoft.Web/sites" \
+  --query "{etat:properties.state, runtime:properties.functionAppConfig.runtime, \
+            memoire:properties.functionAppConfig.scaleAndConcurrency.instanceMemoryMB, \
+            maxInstances:properties.functionAppConfig.scaleAndConcurrency.maximumInstanceCount}"
+```
+
+Relevé du 9 septembre 2026 : `FC1` / `FlexConsumption`, `python 3.13`,
+2048 Mo par instance, 100 instances au plus, état `Running`.
 
 ## État Terraform
 

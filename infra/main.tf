@@ -101,7 +101,11 @@ resource "azurerm_storage_table" "reads" {
 # Contrainte à connaître : Flex n'existe pas dans toutes les régions —
 # `az functionapp list-flexconsumption-locations`.
 resource "azurerm_service_plan" "ricochet" {
-  name                = "plan-${var.function_app_name}"
+  # Nom paramétré, et non déduit de celui de la Function : Azure en attribue un
+  # automatiquement lorsqu'on crée la Function avec `az functionapp create`
+  # (ici `ASP-rgricochet-d9cf`), et un nom déduit ne correspondrait pas à
+  # l'existant — l'import échouerait ou créerait un plan en double.
+  name                = var.service_plan_name
   resource_group_name = azurerm_resource_group.ricochet.name
   location            = azurerm_resource_group.ricochet.location
   os_type             = "Linux"
