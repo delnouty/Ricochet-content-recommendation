@@ -12,6 +12,13 @@
 # À lancer après chaque déploiement, et une fois par semaine pour attraper une
 # dérive sans commit — des artefacts remplacés dans Blob sans redéploiement, par
 # exemple, ce qui est exactement l'incident que ce projet a connu.
+#
+# ⚠️ Un workflow `workflow_dispatch` n'est déclenchable que s'il existe sur la
+# **branche par défaut**. Tant que ce fichier ne vit que sur `dev`,
+# `gh workflow run` répond « could not find any workflows named … » et
+# `gh workflow list` ne le montre pas. Il faut donc le fusionner dans `main`
+# avant de pouvoir le lancer — ce qui, avec la protection de branche, passe par
+# une pull request.
 
 name: Smoke — service déployé
 
