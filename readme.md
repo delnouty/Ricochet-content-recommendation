@@ -115,6 +115,23 @@ pip install -r requirements.txt
 # Download the Globo.com dataset into data/news-portal-user/ (see data/README.md)
 ```
 
+Every program has sensible defaults, so nothing below strictly needs
+configuration. To avoid retyping the ten environment variables in each new
+terminal:
+
+```powershell
+Copy-Item .env.example .env      # then fill in what you need
+. ./scripts/charger_env.ps1      # source it — do not execute it
+```
+
+`.env` is gitignored and never versioned; `.env.example` documents every
+variable. The loader is a shell script rather than `python-dotenv` for two
+reasons: the variables are also read by `az`, `gh`, `curl` and `terraform`, and a
+dependency loaded by application code would eat into the *numpy-only at
+inference* property this project claims. Unfilled placeholders are skipped
+deliberately — a literal `<your-key>` as the function key would produce a
+puzzling 401 instead of a clear error.
+
 ### 2. Build the model artifacts
 
 ```bash

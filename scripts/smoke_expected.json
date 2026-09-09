@@ -1,0 +1,27 @@
+{
+  "url": "https://func-ricochet-darya.azurewebsites.net",
+  "releve_le": "2026-09-09 15:20:16",
+  "cas": {
+    "lecteur connu, stratégie de production": [
+      211442,
+      50644,
+      36162,
+      156279,
+      159938
+    ],
+    "lecteur inconnu — cascade de repli": [
+      211442,
+      50644,
+      36162,
+      156279,
+      209122
+    ],
+    "lecteur inconnu avec historique transmis": [
+      211442,
+      50644,
+      36162,
+      156279,
+      158536
+    ]
+  }
+}

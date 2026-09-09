@@ -402,6 +402,85 @@ change aussi.
 
 ---
 
+## Étape 11 bis — Renouveler la clé de fonction
+
+La clé protège l'endpoint : sans elle, le service répond **401**. Elle circule
+dans l'URL (`?code=…`), donc elle finit dans les historiques de terminal, les
+journaux de proxy et les copier-coller. Il faut savoir la remplacer, et le faire
+au moins après toute session où elle a été manipulée, et après une soutenance où
+elle aurait été communiquée.
+
+Ce qu'elle protège, et ce qu'elle ne protège pas : elle défend **les exécutions
+facturées et la disponibilité du service**, pas la confidentialité du travail. Le
+code est public, les artefacts sont publics sur le HF Hub, et le Space
+fonctionne sans aucune authentification. Rien à cacher, seulement un accès à ne
+pas laisser ouvert.
+
+```powershell
+az login
+
+# 54 caractères alphanumériques tirés au hasard, gardés en variable :
+# la valeur n'apparaît jamais à l'écran.
+$nouveau = -join ((48..57)+(65..90)+(97..122) | Get-Random -Count 54 | ForEach-Object {[char]$_})
+
+# C'est ici que la clé change. L'ancienne cesse de fonctionner immédiatement.
+az functionapp function keys set --name func-ricochet-darya `
+  --resource-group rg-ricochet --function-name recommend `
+  --key-name default --key-value $nouveau
+
+# Le secret du dépôt, pour que la vérification du service déployé continue
+# de fonctionner. La valeur passe de la variable au secret sans transiter
+# par le terminal.
+$nouveau | gh secret set FUNCTION_KEY
+```
+
+| Ligne | Rôle |
+|---|---|
+| `az login` | sans session Azure, les deux commandes suivantes n'ont aucun droit |
+| `$nouveau = …` | tire la nouvelle valeur. **Ne change rien encore** |
+| `az functionapp function keys set` | **remplace la clé.** L'ancienne est invalide dès le retour de la commande |
+| `… \| gh secret set FUNCTION_KEY` | met à jour le secret du dépôt (workflow `smoke.yml`) |
+
+Pourquoi générer la valeur soi-même plutôt que demander un renouvellement : le
+CLI n'expose pas de verbe « renew » pour les clés de fonction. Fixer une valeur
+tirée au hasard produit le même effet — l'ancienne clé ne vaut plus rien — et
+évite un aller-retour par le portail.
+
+**Ce qui cesse de fonctionner aussitôt**, et qu'il faut mettre à jour :
+
+- les terminaux ouverts qui portent `$env:FUNCTION_KEY` ;
+- toute commande `curl` où la clé était collée en dur plutôt que passée par
+  variable.
+
+Le relevé `scripts/smoke_expected.json` n'est **pas** concerné : il contient des
+identifiants d'articles, pas de clé.
+
+### Vérifier
+
+```powershell
+$env:FUNCTION_KEY = az functionapp function keys list --name func-ricochet-darya `
+  --resource-group rg-ricochet --function-name recommend --query default -o tsv
+$env:FUNCTION_URL = "https://func-ricochet-darya.azurewebsites.net/api/recommend"
+python scripts/smoke_azure.py
+gh secret list
+```
+
+Quatre lignes `ok` confirment à la fois la nouvelle clé et le fait que le service
+sert toujours le même modèle. `gh secret list` doit montrer `FUNCTION_KEY` avec
+une date de mise à jour récente.
+
+Un contrôle de plus, qui vaut d'être fait une fois : l'ancienne clé doit être
+refusée.
+
+```powershell
+curl "https://func-ricochet-darya.azurewebsites.net/api/recommend?user_id=0&code=<ancienne>"
+```
+
+Attendu : **401**. Sans ce contrôle, on ne sait pas si l'on a renouvelé la clé ou
+simplement ajouté une seconde clé valide.
+
+---
+
 ## Étape 12 — Erreurs rencontrées, et ce qu'elles signifient
 
 | Symptôme | Cause | Correctif |
