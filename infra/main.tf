@@ -2,7 +2,7 @@
 #
 # This file describes **what is deployed**, not a generic example: names, region
 # and settings match the stack created by hand in September 2026 (see
-# `docs/deploiement_azure.md`, step 5). It is therefore both a definition for
+# `docs/azure_deployment.md`, step 5). It is therefore both a definition for
 # creating a new environment and an importable description of the existing one —
 # see `infra/README.md`.
 #

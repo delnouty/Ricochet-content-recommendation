@@ -1,66 +1,68 @@
-# Spécification des Exigences Utilisateur (URS)
+# User Requirements Specification (URS)
 
-| Champ | Valeur |
+| Field | Value |
 |-------|--------|
-| ID document | MC-URS-001 |
+| Document ID | MC-URS-001 |
 | Version | 0.2 |
-| Statut | DRAFT — pour revue AQ |
-| Système | My Content — système de recommandation d'articles |
-| Date d'émission | 2026-09-08 |
-| Remplace | Version 0.1 du 2026-07-20 |
+| Status | DRAFT — for QA review |
+| System | Ricochet — article recommendation system |
+| Issue date | 2026-09-08 |
+| Supersedes | Version 0.1 of 2026-07-20 |
 
-> **Support assistif — à réviser et approuver par l'AQ/CSV et le métier avant usage.**
+> **Assistive supporting material — to be reviewed and approved by QA/CSV and by
+> the business before use.**
 
-## Tableau d'approbation
+## Approval table
 
-| Rôle | Nom | Signature | Date |
+| Role | Name | Signature | Date |
 |------|-----|-----------|------|
-| Propriétaire métier (CEO) | | | |
-| Propriétaire système (CTO) | | | |
-| Revue Qualité / AQ | | | |
+| Business owner (CEO) | | | |
+| System owner (CTO) | | | |
+| Quality / QA review | | | |
 
 ## Conventions
 
-- Criticité : **H** (haute), **M** (moyenne), **B** (basse).
-- Type : F (fonctionnelle), P (performance), D (données/intégrité), R (réglementaire/qualité).
+- Criticality: **H** (high), **M** (medium), **L** (low).
+- Type: F (functional), P (performance), D (data / integrity), R (regulatory /
+  quality).
 
-## Exigences
+## Requirements
 
-| ID | Type | Crit. | Exigence |
+| ID | Type | Crit. | Requirement |
 |----|------|-------|----------|
-| URS-001 | F | H | Pour un identifiant utilisateur fourni, le système restitue une sélection d'articles recommandés. |
-| URS-002 | F | H | Le nombre d'articles restitués est paramétrable, avec une valeur par défaut de **5**. |
-| URS-003 | F | H | Le système recommande sur la base du contenu déjà lu (approche *content-based*). |
-| URS-004 | F | M | Le système exploite les comportements collectifs (*collaborative filtering*). |
-| URS-005 | F | M | Le système combine les approches (stratégie *hybride*) et permet de choisir la stratégie. |
-| URS-006 | F | H | Un utilisateur sans historique exploitable reçoit une recommandation de repli (articles populaires — *cold start*). |
-| URS-007 | F | H | Les articles déjà lus par l'utilisateur ne sont pas re-recommandés. |
-| URS-008 | F | M | L'ajout d'un nouvel article est pris en charge sans ré-entraînement (via son embedding). |
-| URS-009 | F | M | Le système est accessible via une interface applicative (démonstration). |
-| URS-010 | F | M | Le système est déployable en **trois solutions indépendantes** : serverless Azure, Space Hugging Face, et exécution locale sans réseau. |
-| URS-011 | P | M | Le temps de réponse d'une recommandation est compatible avec un usage interactif (cible : < 2 s hors démarrage à froid). |
-| URS-012 | D | H | Les artefacts de modèle sont **versionnés et traçables** (intégrité, reproductibilité). |
-| URS-013 | D | M | Le pipeline de préparation des modèles est **reproductible** à partir des données et de paramètres documentés. |
-| URS-014 | R | M | Le code source est géré en contrôle de version (Git/GitHub). |
-| URS-015 | F | M | La qualité des recommandations est **évaluable** par des métriques documentées couvrant à la fois la justesse et la variété de l'offre (la justesse seule désigne toujours la stratégie la moins personnalisée). |
-| URS-016 | R | M | Le comportement du modèle IA/ML est ré-évaluable dans le temps (suivi de dérive, ré-entraînement contrôlé). |
-| URS-017 | D | M | Le système ne traite aucune donnée à caractère sensible/réglementé (pas de donnée patient/clinique). |
-| URS-018 | F | H | Un **nouveau lecteur** peut être inscrit dans l'application et reçoit des recommandations immédiatement, sans ré-entraînement du modèle. |
-| URS-019 | F | H | Les recommandations privilégient les articles **récents**. La durée de la fenêtre de récence est un paramètre produit documenté et modifiable. |
-| URS-020 | P | M | Une nouvelle fenêtre de récence devient effective **sans interruption de service**. |
-| URS-021 | D | H | Une version de modèle dont la performance se dégrade au-delà d'un seuil défini **ne peut pas être publiée** (garde-fou de non-régression contre une référence versionnée). |
-| URS-022 | F | M | Les lectures d'un lecteur inscrit sont **conservées** d'une session à l'autre lorsque l'hébergement le permet ; dans le cas contraire, l'application l'annonce explicitement au visiteur. |
+| URS-001 | F | H | For a given user identifier, the system returns a selection of recommended articles. |
+| URS-002 | F | H | The number of articles returned is configurable, with a default of **5**. |
+| URS-003 | F | H | The system recommends on the basis of what has already been read (a *content-based* approach). |
+| URS-004 | F | M | The system exploits collective behaviour (*collaborative filtering*). |
+| URS-005 | F | M | The system combines the approaches (a *hybrid* strategy) and allows the strategy to be chosen. |
+| URS-006 | F | H | A user with no usable history receives a fallback recommendation (popular articles — *cold start*). |
+| URS-007 | F | H | Articles the user has already read are not recommended again. |
+| URS-008 | F | M | A new article can be taken into account without re-training, through its embedding. |
+| URS-009 | F | M | The system is reachable through an application interface (a demonstration). |
+| URS-010 | F | M | The system is deployable as **three independent solutions**: Azure serverless, a Hugging Face Space, and local execution with no network. |
+| URS-011 | P | M | Recommendation response time is compatible with interactive use (target: < 2 s outside a cold start). |
+| URS-012 | D | H | Model artifacts are **versioned and traceable** (integrity, reproducibility). |
+| URS-013 | D | M | The model preparation pipeline is **reproducible** from the data and documented parameters. |
+| URS-014 | R | M | Source code is managed under version control (Git/GitHub). |
+| URS-015 | F | M | Recommendation quality is **measurable** through documented metrics covering both accuracy and the variety of what is offered (accuracy alone always points to the least personalised strategy). |
+| URS-016 | R | M | The behaviour of the AI/ML model can be re-assessed over time (drift monitoring, controlled re-training). |
+| URS-017 | D | M | The system processes no sensitive or regulated data (no patient or clinical data). |
+| URS-018 | F | H | A **new reader** can be registered in the application and receives recommendations immediately, with no re-training of the model. |
+| URS-019 | F | H | Recommendations favour **recent** articles. The length of the recency window is a documented, modifiable product parameter. |
+| URS-020 | P | M | A new recency window takes effect **without a service interruption**. |
+| URS-021 | D | H | A model version whose performance degrades beyond a defined threshold **cannot be published** (a non-regression guard against a versioned reference). |
+| URS-022 | F | M | The reads of a registered reader are **retained** from one session to the next where the hosting allows it; where it does not, the application says so explicitly to the visitor. |
 
-## Hypothèses et contraintes
+## Assumptions and constraints
 
-- Données d'entrée : jeu Globo.com (interactions users↔articles), traité comme
-  donnée de développement.
-- Hébergement : services gérés Azure Functions et Hugging Face Spaces (free tier),
-  plus une exécution locale sans réseau.
+- Input data: the Globo.com dataset (user ↔ article interactions), treated as
+  development data.
+- Hosting: managed Azure Functions and Hugging Face Spaces (free tier) services,
+  plus a local execution with no network.
 
-## Historique des révisions
+## Revision history
 
-| Version | Date | Modifications | Motif |
+| Version | Date | Changes | Reason |
 |---------|------|---------------|-------|
-| 0.1 | 2026-07-20 | Émission initiale. | — |
-| 0.2 | 2026-09-08 | URS-010 : deux solutions → **trois** (l'exécution locale est une solution à part entière). URS-015 reformulée : la qualité ne s'évalue pas sur la seule justesse. Ajout de **URS-018 à URS-022** : inscription d'un nouveau lecteur, fenêtre de récence, mise à jour sans interruption, garde-fou de non-régression, persistance des lectures. | Les mesures conduites entre juillet et septembre ont fait de la **récence** un besoin produit et non un détail d'implémentation ; l'inscription d'un nouveau lecteur, absente de la v0.1, est une attente explicite du cahier des charges. |
+| 0.1 | 2026-07-20 | Initial issue. | — |
+| 0.2 | 2026-09-08 | URS-010: two solutions → **three** (local execution is a solution in its own right). URS-015 reworded: quality is not assessed on accuracy alone. Added **URS-018 to URS-022**: registering a new reader, the recency window, updating without interruption, the non-regression guard, and persistence of reads. | The measurements carried out between July and September made **recency** a product need rather than an implementation detail; registering a new reader, absent from v0.1, is an explicit expectation of the assignment. |

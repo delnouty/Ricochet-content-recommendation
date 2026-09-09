@@ -264,7 +264,7 @@ data, not an artifact, so apps show `Article #<id>` until it's updated). Restart
 afterwards. The local solution reads the folder directly; the Azure and Hugging Face
 solutions need `models/` re-published to Blob Storage or the HF Hub — and for Azure,
 **redeploy rather than restart**: a restart does not guarantee every instance drops its
-artifact cache ([docs/deploiement_azure.md](docs/deploiement_azure.md) step 11).
+artifact cache ([docs/azure_deployment.md](docs/azure_deployment.md) step 11).
 
 Verified on the real catalogue: three added articles took ids 364047–364049 and entered a
 matching user's top-5 immediately, with no model retrained. Rationale and the scheduled
@@ -351,7 +351,7 @@ Replacing a **heavy** artifact needs a redeploy, not a restart: a restart does
 not guarantee that every instance drops its artifact cache. The freshness window
 is the exception — it arrives through a Blob input binding and applies without
 either. Details and the errors actually hit:
-[docs/deploiement_azure.md](docs/deploiement_azure.md).
+[docs/azure_deployment.md](docs/azure_deployment.md).
 
 ## Development flow
 
@@ -374,7 +374,7 @@ documented intention.
 - [docs/presentation.tex](docs/presentation.tex) — defence deck (Beamer, compile with `xelatex`). Slide budget follows the required structure: 8 slides
   for the modelling approaches (10 min), 5 for the in-app features (6 min), 2 for
   the target architecture (2 min), 1 for the demo (2 min).
-- [docs/deploiement_azure.md](docs/deploiement_azure.md) — **step-by-step Azure deployment**: resource creation through to a verified live endpoint, with the errors actually hit and their causes.
+- [docs/azure_deployment.md](docs/azure_deployment.md) — **step-by-step Azure deployment**: resource creation through to a verified live endpoint, with the errors actually hit and their causes.
 - [docs/mlops.md](docs/mlops.md) — temporal split, MLflow tracking, model registry, metric gate, CI.
 - [docs/architecture.md](docs/architecture.md) — MVP architecture, alternatives considered, target architecture.
 - [infra/README.md](infra/README.md) — the Terraform stack: creating a fresh environment, or importing the existing one, and how to tell whether the code still describes reality.

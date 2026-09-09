@@ -1,92 +1,93 @@
-# Analyse de Risque (RA)
+# Risk Assessment (RA)
 
-| Champ | Valeur |
+| Field | Value |
 |-------|--------|
-| ID document | MC-RA-001 |
+| Document ID | MC-RA-001 |
 | Version | 0.2 |
-| Statut | DRAFT — pour revue AQ |
-| Système | My Content — système de recommandation d'articles |
-| Date d'émission | 2026-09-08 |
-| Remplace | Version 0.1 du 2026-07-20 |
+| Status | DRAFT — for QA review |
+| System | Ricochet — article recommendation system |
+| Issue date | 2026-09-08 |
+| Supersedes | Version 0.1 of 2026-07-20 |
 
-> **Support assistif — à réviser et approuver par l'AQ/CSV avant usage.**
+> **Assistive supporting material — to be reviewed and approved by QA/CSV before
+> use.**
 
-## 1. Méthodologie
+## 1. Methodology
 
-Analyse de risque fonctionnelle basée sur le risque (GAMP 5). Pour chaque
-fonction : **Sévérité (S)** × **Probabilité (P)** = classe de risque, puis prise
-en compte de la **Détectabilité (D)** pour la priorité de test.
+A risk-based functional risk assessment (GAMP 5). For each function:
+**Severity (S)** × **Probability (P)** = risk class, then **Detectability (D)**
+is taken into account for test priority.
 
-Échelles : S/P/D ∈ {1 Faible, 2 Moyen, 3 Élevé}. Priorité = combinaison
-S×P (classe 1–3) modulée par D.
+Scales: S/P/D ∈ {1 low, 2 medium, 3 high}. Priority = the S×P combination
+(class 1–3) modulated by D.
 
-## 2. Évaluation d'impact GxP (global)
+## 2. GxP impact assessment (overall)
 
-Le système **ne traite aucune donnée GxP** (patient, clinique, qualité produit)
-— cf. URS-017. Il n'a **pas d'impact direct** sur la sécurité patient, l'efficacité
-d'un produit de santé, ni sur l'intégrité de données réglementées.
-**Impact GxP global : FAIBLE.** L'effort de test est priorisé sur la
-justesse fonctionnelle, l'intégrité des artefacts et la reproductibilité.
+The system **processes no GxP data** (patient, clinical, product quality) — see
+URS-017. It has **no direct impact** on patient safety, on the efficacy of a
+health product, or on the integrity of regulated data. **Overall GxP impact:
+LOW.** Test effort is prioritised on functional accuracy, artifact integrity and
+reproducibility.
 
-## 3. Analyse de risque fonctionnelle
+## 3. Functional risk assessment
 
-| ID risque | Fonction (FS) | Danger / défaillance | S | P | D | Classe | Maîtrise / mitigation | Test |
+| Risk ID | Function (FS) | Hazard / failure | S | P | D | Class | Control / mitigation | Test |
 |-----------|---------------|----------------------|---|---|---|--------|-----------------------|------|
-| R-01 | FS-006 | Recommander un article déjà lu | 2 | 2 | 2 | Moyen | Exclusion + filtrage `-inf` ; test de non-régression | OQ-04, UT `test_content_excludes_already_seen` |
-| R-02 | FS-001 | Nombre d'articles renvoyés ≠ attendu | 2 | 1 | 1 | Faible | Contrat de fonction ; test de cardinalité | OQ-01, UT `test_recommend_returns_exactly_n` |
-| R-03 | FS-005 | Nouvel utilisateur sans recommandation (échec cold start) | 3 | 2 | 2 | Élevé | Repli popularité systématique | OQ-05, UT `test_unknown_user_falls_back_to_popularity` |
-| R-04 | FS-003 | Score collaboratif erroné (mauvais mapping id↔facteurs) | 2 | 2 | 3 | Moyen | Index explicites `cf_*` ; test de classement | OQ-06, UT `test_collaborative_ranks_by_factor_score` |
-| R-05 | FS-011 | Artefacts non reproductibles / non versionnés | 2 | 2 | 2 | Moyen | `random_state` fixés ; versionnage Blob/HF Hub | IQ-03, PQ-03 |
-| R-06 | FS-009 | Copies déployées du cœur de reco désynchronisées (Azure ≠ HF) | 2 | 2 | 3 | Moyen | `sync_recommender.py --check` ; test CI | UT `test_deployed_copies_in_sync` |
-| R-07 | FS-015 | Entrée invalide non gérée (crash) | 1 | 2 | 1 | Faible | Validation d'entrée + code HTTP 400 | OQ-07, UT `test_invalid_method_raises` |
-| R-08 | FS-010 | Latence excessive au démarrage à froid | 1 | 3 | 1 | Faible | Cache modèle ; artefacts ACP allégés | PQ-01 |
-| R-09 | Modèle IA/ML | **Dérive du modèle** : baisse de pertinence dans le temps | 2 | 3 | 3 | Élevé | Suivi de métrique + ré-entraînement planifié (archi cible) | PQ-02 |
-| R-10 | Modèle IA/ML | Biais / manque de diversité (effet bulle) | 2 | 2 | 3 | Moyen | Stratégie hybride ; suivi diversité/couverture (backlog) | PQ-02 |
-| R-11 | FS-016 | Traitement involontaire de données sensibles | 3 | 1 | 2 | Faible | Entrées = identifiants anonymes uniquement ; revue de conception | OQ-08 |
-| R-12 | FS-018, FS-023 | **Fenêtre de fraîcheur périmée servie** : artefacts non republiés, ou lecture de binding en échec | 3 | 2 | 3 | **Élevé** | Binding relu à chaque invocation (pas de redémarrage requis) ; métadonnées de fenêtre affichées dans l'interface ; repli journalisé | OQ-11, UT `test_artefact_absent_sans_effet`, `test_elargissement_automatique` |
-| R-13 | FS-024 | **Modèle erroné servi depuis un cache local** jugé valide sur la seule taille du fichier | 3 | 2 | 3 | **Élevé** | Validité jugée sur taille **et** date du blob ; remplacement d'artefact lourd suivi d'un redéploiement, pas d'un simple redémarrage | OQ-12, UT `test_meme_taille_mais_blob_plus_recent` |
-| R-14 | FS-020, FS-021 | Lecteur inscrit ne recevant que de la popularité (profil non transmis au service sans état) | 2 | 2 | 2 | Moyen | Paramètre `history` dans la requête ; injection des historiques inscrits dans le moteur en mémoire | OQ-13, UT `test_identifiant_hors_catalogue_injecte_apres_chargement` |
-| R-15 | FS-025 | Publication d'une version de modèle dégradée | 2 | 2 | 3 | Moyen | Porte de qualité contre référence versionnée ; référence promue délibérément | OQ-14 |
-| R-16 | FS-013 | **Décision de conception fondée sur une évaluation biaisée** | 3 | 2 | 3 | **Élevé** | Découpage temporel 60/20/20 ; réglages choisis sur la validation, test intact ; balayage **croisé** des réglages | PQ-02 |
-| R-17 | FS-027 | Variante de modèle inadéquate livrée par défaut | 1 | 2 | 3 | Faible | Valeurs par défaut alignées sur la variante retenue ; variante rejetée accessible seulement par drapeau explicite | OQ-15, UT `test_variante_etoiles_exige_les_etoiles` |
+| R-01 | FS-006 | Recommending an already-read article | 2 | 2 | 2 | Medium | Exclusion plus `-inf` filtering; non-regression test | OQ-04, UT `test_content_excludes_already_seen` |
+| R-02 | FS-001 | Number of articles returned ≠ expected | 2 | 1 | 1 | Low | Function contract; cardinality test | OQ-01, UT `test_recommend_returns_exactly_n` |
+| R-03 | FS-005 | A new user left with no recommendation (cold-start failure) | 3 | 2 | 2 | High | Systematic popularity fallback | OQ-05, UT `test_unknown_user_falls_back_to_popularity` |
+| R-04 | FS-003 | Wrong collaborative score (bad id ↔ factor mapping) | 2 | 2 | 3 | Medium | Explicit `cf_*` indices; ranking test | OQ-06, UT `test_collaborative_ranks_by_factor_score` |
+| R-05 | FS-011 | Artifacts not reproducible or not versioned | 2 | 2 | 2 | Medium | Fixed `random_state`; versioning in Blob / HF Hub | IQ-03, PQ-03 |
+| R-06 | FS-009 | Deployed copies of the core out of step (Azure ≠ HF) | 2 | 2 | 3 | Medium | `sync_recommender.py --check`; CI test | UT `test_deployed_copies_in_sync` |
+| R-07 | FS-015 | Invalid input unhandled (crash) | 1 | 2 | 1 | Low | Input validation plus HTTP 400 | OQ-07, UT `test_invalid_method_raises` |
+| R-08 | FS-010 | Excessive latency on a cold start | 1 | 3 | 1 | Low | Model cache; slimmed PCA artifacts | PQ-01 |
+| R-09 | AI/ML model | **Model drift**: relevance falling over time | 2 | 3 | 3 | High | Metric monitoring plus scheduled re-training (target architecture) | PQ-02 |
+| R-10 | AI/ML model | Bias / lack of diversity (filter bubble) | 2 | 2 | 3 | Medium | Hybrid strategy; diversity and coverage monitoring (backlog) | PQ-02 |
+| R-11 | FS-016 | Inadvertent processing of sensitive data | 3 | 1 | 2 | Low | Inputs are anonymous identifiers only; design review | OQ-08 |
+| R-12 | FS-018, FS-023 | **A stale freshness window served**: artifacts not republished, or a failed binding read | 3 | 2 | 3 | **High** | Binding re-read on every invocation (no restart required); window metadata displayed in the interface; fallback logged | OQ-11, UT `test_artefact_absent_sans_effet`, `test_elargissement_automatique` |
+| R-13 | FS-024 | **The wrong model served from a local cache** judged valid on file size alone | 3 | 2 | 3 | **High** | Validity judged on the size **and** the date of the blob; replacing a heavy artifact is followed by a redeployment, not merely a restart | OQ-12, UT `test_meme_taille_mais_blob_plus_recent` |
+| R-14 | FS-020, FS-021 | A registered reader given popularity only (profile not passed to the stateless service) | 2 | 2 | 2 | Medium | The `history` request parameter; injection of registered histories into the in-memory engine | OQ-13, UT `test_identifiant_hors_catalogue_injecte_apres_chargement` |
+| R-15 | FS-025 | A degraded model version published | 2 | 2 | 3 | Medium | Quality gate against a versioned reference; the reference is promoted deliberately | OQ-14 |
+| R-16 | FS-013 | **A design decision based on a biased evaluation** | 3 | 2 | 3 | **High** | Temporal 60/20/20 split; settings chosen on validation, test left untouched; **joint** sweep of the settings | PQ-02 |
+| R-17 | FS-027 | An unsuitable model variant shipped by default | 1 | 2 | 3 | Low | Defaults aligned with the retained variant; the rejected variant reachable only through an explicit flag | OQ-15, UT `test_variante_etoiles_exige_les_etoiles` |
 
-## 4. Intégrité des données — ALCOA+
+## 4. Data integrity — ALCOA+
 
-| Principe | Application au système |
+| Principle | Application to this system |
 |----------|------------------------|
-| **A**ttribuable | Modifications de code tracées via Git (auteur, horodatage). |
-| **L**isible | Artefacts et code lisibles/documentés ; formats ouverts (npy, pkl, csv). |
-| **C**ontemporain | Journaux d'exécution horodatés (Application Insights côté Azure). |
-| **O**riginal | Données source conservées ; artefacts régénérables depuis la source. |
-| **A**ccurate (exact) | Vérifié par tests unitaires et OQ ; `random_state` fixés. |
-| +Complet / Cohérent / Durable / Disponible | Versionnage Blob/HF Hub ; dépôt Git ; sauvegardes fournisseur. |
+| **A**ttributable | Code changes traced through Git (author, timestamp). |
+| **L**egible | Artifacts and code readable and documented; open formats (npy, pkl, csv). |
+| **C**ontemporaneous | Timestamped execution logs (Application Insights on the Azure side). |
+| **O**riginal | Source data retained; artifacts regenerable from the source. |
+| **A**ccurate | Verified by unit tests and the OQ; `random_state` fixed. |
+| + Complete / Consistent / Enduring / Available | Versioning in Blob and HF Hub; Git repository; supplier backups. |
 
-## 5. Risques résiduels
+## 5. Residual risks
 
-Après mitigations, les risques résiduels sont jugés **acceptables** au regard de
-l'impact GxP faible. Les risques IA/ML (R-09, R-10) requièrent un **suivi en
-exploitation** (monitoring de dérive) porté par l'architecture cible.
-Décision d'acceptation à statuer par l'AQ.
+After mitigation, the residual risks are judged **acceptable** in view of the low
+GxP impact. The AI/ML risks (R-09, R-10) require **monitoring in operation**
+(drift monitoring), carried by the target architecture. The acceptance decision
+is for QA to rule on.
 
-Risque résiduel signalé pour R-12 : la fenêtre de fraîcheur est aujourd'hui
-recalculée par le traitement **hors-ligne**, non par un flux continu. Une
-interruption du traitement périodique n'est pas détectée par le service lui-même ;
-seule la date portée par `recent_window.json` permet de le constater.
+One residual risk is flagged for R-12: the freshness window is currently
+recomputed by the **offline** job, not by a continuous stream. An interruption of
+that periodic job is not detected by the service itself; only the date carried by
+`recent_window.json` makes it visible.
 
-## 6. Défaillances observées — justification des risques R-12, R-13 et R-16
+## 6. Observed failures — the justification for risks R-12, R-13 and R-16
 
-Trois des risques ajoutés en version 0.2 ne sont pas hypothétiques : ils ont été
-**observés puis corrigés** pendant le développement. Ils sont documentés ici parce
-qu'un risque constaté vaut mieux qu'un risque supposé, et que leur détectabilité
-mesurée (D = 3, faible) est le point important.
+Three of the risks added in version 0.2 are not hypothetical: they were
+**observed and then corrected** during development. They are documented here
+because an observed risk is worth more than a supposed one, and because their
+measured detectability (D = 3, low) is the important point.
 
-| Risque | Ce qui s'est produit | Comment cela a été détecté |
+| Risk | What happened | How it was detected |
 |--------|----------------------|----------------------------|
-| R-12 | Un chargeur d'artefacts suivant une liste figée ne récupérait pas les fichiers de fraîcheur ajoutés après lui. Le service répondait **sans aucune erreur**, en servant la popularité de tout l'historique : HitRate@5 de 0,0010 au lieu de 0,2525. | Comparaison de la réponse du service déployé avec celle du service local (étape imposée avant tout déploiement). |
-| R-13 | Un modèle SVD reconstruit avec une autre définition de note occupait **exactement la même taille** ; les instances au cache survivant ne l'ont jamais retéléchargé. Le service a servi deux modèles différents selon l'instance sollicitée — 6 réponses sur 10 avec le nouveau, 4 avec l'ancien. | Répétition du même appel après remplacement de l'artefact. |
-| R-16 | Une évaluation *leave-last-out* sur données complètes, le modèle ayant vu le clic à prédire, donnait 0,2415 pour l'ALS contre **0,0415** en découpage temporel — un facteur 5,8 de justesse imaginaire. Deux réglages optimisés séparément, une fois combinés, se sont révélés être la **pire** des configurations. | Mise en place du découpage temporel, puis balayage croisé des réglages. |
+| R-12 | An artifact loader following a frozen list did not fetch the freshness files added after it. The service answered **with no error at all**, serving popularity over the whole history: a HitRate@5 of 0.0010 instead of 0.2525. | Comparing the deployed service's response with the local service's (a step mandated before any deployment). |
+| R-13 | An SVD model rebuilt with a different rating definition occupied **exactly the same size**; instances whose cache had survived never downloaded it again. The service served two different models depending on which instance was hit — 6 responses out of 10 with the new one, 4 with the old. | Repeating the same call after the artifact had been replaced. |
+| R-16 | A *leave-last-out* evaluation on complete data, with the model having already seen the click to be predicted, gave 0.2415 for ALS against **0.0415** under a temporal split — a factor of 5.8 of imaginary accuracy. Two settings optimised separately turned out, once combined, to be the **worst** of the configurations. | Introducing the temporal split, then sweeping the settings jointly. |
 
-Enseignement commun aux trois : **un système qui répond n'est pas un système
-correct.** Aucune de ces défaillances ne levait d'erreur. C'est ce qui justifie la
-cote de détectabilité D = 3 et le recours à des contrôles comparatifs plutôt qu'à
-la seule absence d'exception.
+The lesson common to all three: **a system that answers is not a system that is
+correct.** None of these failures raised an error. That is what justifies the
+detectability rating of D = 3, and the use of comparative checks rather than the
+mere absence of an exception.
