@@ -1,0 +1,73 @@
+#!/bin/sh
+# Refuse un push qui emporterait un secret, ou dont les tests échouent.
+#
+# Pourquoi au push et non au commit : un commit local est réversible sans
+# conséquence (amend, rebase, reset). Un push est le moment où le contenu
+# devient public et où l'historique cesse d'être à soi. C'est donc là que la
+# vérification a le meilleur rapport entre protection et gêne — un commit de
+# travail intermédiaire n'est pas bloqué.
+#
+# Installation, une fois par clone :
+#
+#     git config core.hooksPath scripts/hooks
+#
+# Contournement (à réserver aux faux positifs) : `git push --no-verify`.
+#
+# Git fournit sur l'entrée standard une ligne par référence poussée :
+#     <ref locale> <sha local> <ref distante> <sha distant>
+# Le sha distant vaut 40 zéros quand la branche n'existe pas encore en face.
+
+set -e
+
+ZERO="0000000000000000000000000000000000000000"
+
+# L'environnement virtuel n'est pas actif dans un hook : on cherche un
+# interpréteur, en préférant celui du projet (c'est lui qui a pytest).
+for candidat in ./.venv/Scripts/python.exe ./.venv/bin/python python3 python py; do
+    if command -v "$candidat" >/dev/null 2>&1; then
+        PY="$candidat"
+        break
+    fi
+done
+
+if [ -z "$PY" ]; then
+    echo "pre-push : aucun interpréteur Python trouvé — vérifications ignorées." >&2
+    echo "           la CI refera les contrôles, mais après le push." >&2
+    exit 0
+fi
+
+echo "pre-push : vérification des secrets et des tests unitaires…"
+
+# ── 1. Secrets, sur les seuls commits qui partent ────────────────────────────
+# Balayer tout l'historique à chaque push serait inutilement long ; l'index ne
+# dirait rien des commits déjà faits. La bonne portée est la plage poussée.
+while read -r ref_locale sha_local ref_distante sha_distant; do
+    [ -z "$sha_local" ] && continue
+    [ "$sha_local" = "$ZERO" ] && continue      # suppression de branche
+
+    if [ "$sha_distant" = "$ZERO" ]; then
+        # Branche nouvelle en face : on examine ce qu'elle apporte de plus que
+        # tout ce que le distant connaît déjà.
+        plage="$sha_local --not --remotes"
+    else
+        plage="$sha_distant..$sha_local"
+    fi
+
+    if ! "$PY" scripts/check_secrets.py --range "$plage"; then
+        echo "" >&2
+        echo "pre-push refusé : un secret part avec $ref_locale." >&2
+        echo "Le commit existe déjà en local : révoquer la valeur, puis" >&2
+        echo "réécrire l'historique local (git rebase -i / git commit --amend)." >&2
+        exit 1
+    fi
+done
+
+# ── 2. Tests unitaires ───────────────────────────────────────────────────────
+# Aucune donnée requise (artefacts synthétiques) : quelques secondes.
+if ! "$PY" -m pytest tests/ -q; then
+    echo "" >&2
+    echo "pre-push refusé : les tests unitaires échouent." >&2
+    exit 1
+fi
+
+echo "pre-push : tout est vert."

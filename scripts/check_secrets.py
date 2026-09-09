@@ -14,11 +14,18 @@ et les `.ipynb`. Elle laissait donc passer :
 
 Utilisation :
 
-    python scripts/check_secrets.py              # fichiers suivis par git
-    python scripts/check_secrets.py --history    # tous les commits (avant de
-                                                 # rendre le dépôt public)
+    python scripts/check_secrets.py                          # fichiers suivis
+    python scripts/check_secrets.py --staged                 # contenu indexé
+    python scripts/check_secrets.py --range origin/main..HEAD  # ce qui part au
+                                                             # push (hook pre-push)
+    python scripts/check_secrets.py --history                # tous les commits
+                                                             # (avant publication)
 
 Code de sortie : 0 = rien trouvé, 1 = secret probable.
+
+Un constat examiné et jugé inoffensif s'inscrit dans `.secretsignore`, par son
+**empreinte** (jamais sa valeur) et avec sa justification. Le nombre de constats
+ainsi écartés est affiché à chaque exécution.
 
 **Parti pris : pas de détection par entropie.** Un seuil d'entropie signalerait
 les sorties d'images des notebooks (base64) à chaque exécution, et une
@@ -81,6 +88,41 @@ EXTENSIONS_IGNOREES = {".png", ".jpg", ".jpeg", ".gif", ".pdf", ".npy", ".pkl",
                        ".db", ".woff", ".woff2", ".ttf", ".ico", ".zip"}
 
 
+FICHIER_IGNORE = Path(".secretsignore")
+
+
+def empreinte(valeur: str) -> str:
+    """Empreinte courte d'une valeur trouvée, pour la lister sans l'écrire."""
+    import hashlib
+
+    return hashlib.sha256(valeur.strip().encode()).hexdigest()[:16]
+
+
+def charger_acceptes() -> dict[str, str]:
+    """Constats déjà examinés et acceptés (`.secretsignore`) : empreinte -> motif.
+
+    Pourquoi une liste d'acceptation : l'historique contient des appâts factices
+    (les anciennes données de `tests/test_check_secrets.py`, avant qu'elles ne
+    soient assemblées à l'exécution). Sans cette liste, `--history` signalerait
+    éternellement les mêmes quatre constats, et une vraie fuite se perdrait dans
+    le bruit — une alarme permanente est une alarme ignorée.
+
+    Le fichier ne contient que des **empreintes**, jamais les valeurs : il peut
+    donc être versionné sans rien publier. Et comme l'empreinte porte sur la
+    valeur exacte, accepter un appât n'accepte pas un secret voisin.
+    """
+    if not FICHIER_IGNORE.exists():
+        return {}
+    acceptes = {}
+    for ligne in FICHIER_IGNORE.read_text(encoding="utf-8").splitlines():
+        ligne = ligne.strip()
+        if not ligne or ligne.startswith("#"):
+            continue
+        empreinte_lue, _, motif = ligne.partition("#")
+        acceptes[empreinte_lue.strip()] = motif.strip() or "sans justification"
+    return acceptes
+
+
 def fichiers_suivis() -> list[str]:
     sortie = subprocess.run(["git", "ls-files"], capture_output=True, text=True,
                             check=True).stdout
@@ -93,7 +135,15 @@ def _masquer(valeur: str) -> str:
     return valeur[:6] + "…" + valeur[-4:] if len(valeur) > 14 else "…"
 
 
-def examiner(texte: str, origine: str) -> list[str]:
+def examiner(texte: str, origine: str,
+             acceptes: dict[str, str] | None = None) -> list[str]:
+    """Constats trouvés dans `texte`, hors gabarits et hors liste d'acceptation.
+
+    `acceptes` est incrémenté d'un compteur : les constats écartés sont comptés
+    et annoncés, jamais tus. Une suppression invisible est précisément le défaut
+    que ce dépôt a rencontré plusieurs fois.
+    """
+    acceptes = acceptes if acceptes is not None else {}
     trouves = []
     for numero, ligne in enumerate(texte.splitlines(), start=1):
         for nom, motif, consequence in MOTIFS:
@@ -103,63 +153,134 @@ def examiner(texte: str, origine: str) -> list[str]:
             valeur = m.group(1) if m.groups() else m.group(0)
             if GABARITS.match(valeur.strip()):
                 continue
+            if empreinte(valeur) in acceptes:
+                examiner.ignores += 1
+                continue
             trouves.append(f"{origine}:{numero}  {nom} — {consequence}\n"
-                           f"    {_masquer(valeur)}")
+                           f"    {_masquer(valeur)}   empreinte {empreinte(valeur)}")
     return trouves
 
 
+examiner.ignores = 0
+
+
 def examiner_arbre() -> list[str]:
+    acceptes = charger_acceptes()
     trouves = []
     for chemin in fichiers_suivis():
         try:
             texte = Path(chemin).read_text(encoding="utf-8", errors="ignore")
         except OSError:
             continue
-        trouves += examiner(texte, chemin)
+        trouves += examiner(texte, chemin, acceptes)
     return trouves
 
 
-def examiner_historique() -> list[str]:
-    """Balaie chaque version de chaque fichier de tous les commits.
+def examiner_index() -> list[str]:
+    """Examine le contenu **indexé**, c'est-à-dire ce qui part au commit.
+
+    Ni l'arbre de travail ni HEAD : un secret peut être indexé puis retiré du
+    fichier avant le commit — il partirait quand même. On lit donc les blobs de
+    l'index (`git show :fichier`), et seulement les fichiers ajoutés ou modifiés.
+    """
+    sortie = subprocess.run(
+        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR"],
+        capture_output=True, text=True, check=True).stdout
+    acceptes = charger_acceptes()
+    trouves = []
+    for chemin in sortie.splitlines():
+        if not chemin or Path(chemin).suffix.lower() in EXTENSIONS_IGNOREES:
+            continue
+        blob = subprocess.run(["git", "show", f":{chemin}"], capture_output=True)
+        if blob.returncode != 0:
+            continue
+        texte = blob.stdout.decode("utf-8", errors="ignore")
+        trouves += examiner(texte, chemin, acceptes)
+    return trouves
+
+
+def examiner_objets(*revisions: str, etiquette: str = "historique") -> list[str]:
+    """Balaie chaque version de chaque fichier des révisions données.
+
+    `revisions` est passé tel quel à `git rev-list --objects` : `--all` pour tout
+    l'historique, ou `origin/main..HEAD` pour les seuls commits sur le départ.
 
     Un secret retiré dans un commit ultérieur reste lisible dans l'historique :
     rendre le dépôt public le publierait.
     """
-    commits = subprocess.run(["git", "rev-list", "--all"], capture_output=True,
-                             text=True, check=True).stdout.split()
-    trouves, vus = [], set()
-    for commit in commits:
-        liste = subprocess.run(["git", "ls-tree", "-r", "--name-only", commit],
-                               capture_output=True, text=True).stdout.splitlines()
-        for chemin in liste:
-            if Path(chemin).suffix.lower() in EXTENSIONS_IGNOREES:
-                continue
-            blob = subprocess.run(["git", "rev-parse", f"{commit}:{chemin}"],
-                                  capture_output=True, text=True)
-            if blob.returncode != 0:
-                continue
-            oid = blob.stdout.strip()
-            if oid in vus:          # même contenu déjà examiné
-                continue
-            vus.add(oid)
-            contenu = subprocess.run(["git", "cat-file", "-p", oid],
-                                     capture_output=True)
-            texte = contenu.stdout.decode("utf-8", errors="ignore")
-            trouves += examiner(texte, f"{commit[:8]}:{chemin}")
-    print(f"[historique] {len(commits)} commits, {len(vus)} versions de fichiers")
+    # `rev-list --objects` liste les objets sous la forme « oid chemin ». On
+    # récupère ensuite les contenus en **un seul** `cat-file --batch` : une
+    # première version lançait trois processus git par version de fichier et
+    # prenait plusieurs minutes, ce qui décourage d'exécuter la vérification au
+    # moment où elle compte.
+    lancement = subprocess.run(["git", "rev-list", "--objects", *revisions],
+                               capture_output=True, text=True)
+    if lancement.returncode != 0:
+        print(f"[{etiquette}] plage illisible ({' '.join(revisions)}) — "
+              f"{lancement.stderr.strip().splitlines()[:1]}")
+        return []
+    objets = lancement.stdout
+
+    a_lire: dict[str, str] = {}          # oid -> chemin (le premier rencontré)
+    for ligne in objets.splitlines():
+        oid, _, chemin = ligne.partition(" ")
+        if not chemin or Path(chemin).suffix.lower() in EXTENSIONS_IGNOREES:
+            continue
+        a_lire.setdefault(oid, chemin)
+
+    if not a_lire:
+        print(f"[{etiquette}] aucun fichier texte à examiner")
+        return []
+
+    lot = subprocess.run(["git", "cat-file", "--batch"],
+                         input="\n".join(a_lire).encode(),
+                         capture_output=True)
+    acceptes = charger_acceptes()
+    flux, trouves = lot.stdout, []
+    position = 0
+    while position < len(flux):
+        fin_entete = flux.find(b"\n", position)
+        if fin_entete == -1:
+            break
+        entete = flux[position:fin_entete].decode("utf-8", errors="ignore").split()
+        position = fin_entete + 1
+        if len(entete) < 3 or entete[1] != "blob":
+            continue                     # objet manquant, ou arbre/commit
+        oid, taille = entete[0], int(entete[2])
+        contenu = flux[position:position + taille]
+        position += taille + 1           # + le saut de ligne final
+        texte = contenu.decode("utf-8", errors="ignore")
+        trouves += examiner(texte, f"{etiquette}:{a_lire.get(oid, oid[:8])}",
+                            acceptes)
+
+    print(f"[{etiquette}] {len(a_lire)} versions de fichiers examinées")
     return trouves
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--history", action="store_true",
+    groupe = parser.add_mutually_exclusive_group()
+    groupe.add_argument("--history", action="store_true",
                         help="examiner tous les commits, et pas seulement "
                              "l'état courant (à faire avant de rendre le dépôt "
                              "public : l'historique reste lisible)")
+    groupe.add_argument("--staged", action="store_true",
+                        help="examiner le contenu indexé (avant un commit)")
+    groupe.add_argument("--range", metavar="PLAGE",
+                        help="examiner les objets d'une plage de révisions, "
+                             "p. ex. « origin/main..HEAD » — utilisé par le hook "
+                             "pre-push pour ne contrôler que ce qui part")
     args = parser.parse_args()
 
-    trouves = examiner_historique() if args.history else examiner_arbre()
+    if args.history:
+        trouves = examiner_objets("--all")
+    elif args.range:
+        trouves = examiner_objets(*args.range.split(), etiquette="plage")
+    elif args.staged:
+        trouves = examiner_index()
+    else:
+        trouves = examiner_arbre()
 
     if trouves:
         print(f"\n{len(trouves)} secret(s) probable(s) :\n")
@@ -168,10 +289,19 @@ def main() -> int:
         print("\nSi la valeur est réelle : la **révoquer** d'abord (une valeur "
               "retirée d'un fichier reste dans l'historique git), puis "
               "remplacer par une variable d'environnement.")
+        if args.staged:
+            print("Si c'est un faux positif : `git commit --no-verify`.")
         return 1
 
-    perimetre = "tout l'historique" if args.history else "les fichiers suivis"
+    perimetre = ("tout l'historique" if args.history else
+                 f"la plage {args.range}" if args.range else
+                 "le contenu indexé" if args.staged else
+                 "les fichiers suivis")
     print(f"aucun secret détecté dans {perimetre}")
+    if examiner.ignores:
+        # Annoncé, jamais tu : une suppression silencieuse ferait de cette
+        # vérification une vérification qu'on croit avoir.
+        print(f"({examiner.ignores} constat(s) écarté(s) par {FICHIER_IGNORE})")
     return 0
 
 

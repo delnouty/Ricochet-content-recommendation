@@ -1,0 +1,11 @@
+# Fins de ligne.
+#
+# `core.autocrlf=true` (le défaut de Git pour Windows) convertit LF en CRLF à
+# l'extraction. Pour un script shell, c'est fatal : l'interpréteur lit
+# « #!/bin/sh\r » et répond « bad interpreter ». Le hook pre-commit ne
+# s'exécuterait alors pas — **sans message d'erreur au moment du commit**, donc
+# sans que personne remarque que la vérification a disparu.
+#
+# On force donc LF sur ce qui doit être exécuté par un shell.
+scripts/hooks/* text eol=lf
+*.sh text eol=lf

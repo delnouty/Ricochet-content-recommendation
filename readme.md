@@ -280,9 +280,14 @@ Unit tests run on synthetic artifacts — no real data required:
 ```bash
 pip install -r requirements-dev.txt
 python -m pytest tests/ -q
+
+# One-time, per clone: install the pre-push hook. It refuses a push whose
+# commits carry a secret in clear text, or whose unit tests fail. Versioned
+# under scripts/hooks/, so it stays in sync with the repo.
+git config core.hooksPath scripts/hooks
 ```
 
-59 tests. Coverage: all five ranking strategies including the composition of `mix`,
+78 tests. Coverage: all five ranking strategies including the composition of `mix`,
 exclusion of already-read articles, the four-level fallback cascade and regional cold
 start, the freshness window (anchor robust to outlier timestamps, automatic widening,
 `fresh_only` toggle), the two SVD rating variants, artifact-cache freshness, robustness

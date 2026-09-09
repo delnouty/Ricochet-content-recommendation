@@ -158,6 +158,84 @@ retiré reste lisible dans l'historique. Balayer tous les commits :
 python scripts/check_secrets.py --history
 ```
 
+#### Le hook `pre-push` — le dernier moment où c'est encore réversible
+
+La CI s'exécute **après** le push : à ce moment le secret est déjà chez
+l'hébergeur, et l'effacer demande de réécrire un historique publié. Le hook,
+lui, refuse le push.
+
+Le choix du `pre-push` plutôt que du `pre-commit` est délibéré : un commit local
+se corrige sans conséquence (`amend`, `rebase`, `reset`), et bloquer chaque
+commit de travail intermédiaire coûte plus qu'il ne protège. Le push est le
+moment où le contenu devient public et où l'historique cesse d'être à soi.
+
+Une commande, une fois par clone :
+
+```bash
+git config core.hooksPath scripts/hooks
+```
+
+`scripts/hooks/pre-push` est **versionné** — contrairement à `.git/hooks/`, qui
+ne suit pas le dépôt. Pointer `core.hooksPath` dessus le garde à jour sans
+recopie.
+
+Il fait deux choses, dans cet ordre :
+
+| Contrôle | Portée | Pourquoi cette portée |
+|---|---|---|
+| secrets | `--range <sha distant>..<sha local>` | seuls les commits qui partent. Tout l'historique serait long à chaque push ; l'index ne dirait rien des commits déjà faits |
+| tests unitaires | `pytest tests/` | aucune donnée requise, quelques secondes |
+
+Git fournit les références poussées sur l'entrée standard, une ligne par
+référence — le hook les lit toutes, et traite le cas d'une branche nouvelle en
+face (`sha` distant à zéro) en comparant à ce que le distant connaît déjà.
+
+En cas de secret, l'arrêt est immédiat : les tests ne tournent pas, et le
+message rappelle que le commit existe déjà en local, donc qu'il faut révoquer la
+valeur puis réécrire l'historique **local**. Faux positif :
+`git push --no-verify`.
+
+Le hook cherche l'interpréteur lui-même en préférant celui du projet (c'est lui
+qui a `pytest`, et l'environnement virtuel n'est pas actif dans un hook). S'il
+n'en trouve aucun, il laisse passer **en le disant** plutôt que de bloquer le
+travail — la CI refera les contrôles.
+
+Deux détails sans lesquels le hook ne servirait à rien :
+
+- `.gitattributes` force **LF** sur `scripts/hooks/*`. Avec
+  `core.autocrlf=true` (défaut sous Windows), le script serait extrait en CRLF,
+  l'interpréteur lirait `#!/bin/sh\r` et le hook ne s'exécuterait pas — *sans
+  erreur au moment du push*, donc sans que personne remarque sa disparition.
+- Le bit exécutable est enregistré dans l'index (mode `100755`), pour que le
+  hook fonctionne aussi sur un clone Linux ou macOS.
+
+Les trois issues ont été vérifiées : plage propre (les tests tournent, tout est
+vert), secret dans la plage poussée (refus, tests non exécutés), test en échec
+(refus).
+
+#### Constats acceptés (`.secretsignore`)
+
+Un commit antérieur a versionné les appâts de `tests/test_check_secrets.py`
+écrits en clair. Ils sont depuis assemblés à l'exécution, mais l'historique git
+reste lisible : `--history` les retrouvera toujours. Sans liste d'acceptation,
+la vérification d'avant-publication serait **définitivement rouge**, et une
+vraie fuite se perdrait dans quatre constats connus.
+
+`.secretsignore` liste donc ces constats par **empreinte** (SHA-256 tronqué de
+la valeur, jamais la valeur) avec leur justification. Trois propriétés
+délibérées :
+
+- le fichier est versionnable sans rien publier ;
+- l'empreinte porte sur la valeur exacte : accepter un appât n'accepte pas un
+  secret voisin — c'est testé ;
+- le nombre de constats écartés est **affiché à chaque exécution**, pour que la
+  liste ne grossisse pas en silence.
+
+Le balayage de l'historique lit tous les objets en un seul `git cat-file
+--batch` : 350 versions de fichiers en 0,6 s. Une première version lançait trois
+processus git par version de fichier et prenait plusieurs minutes — assez pour
+décourager de l'exécuter au moment où elle compte.
+
 ### `.github/workflows/train.yml` — manuel
 
 ```
