@@ -71,29 +71,39 @@ articles): [docs/architecture.md](docs/architecture.md).
 ## Repository layout
 
 ```
-├── src/
-│   ├── recommender.py       # inference core (numpy only) — single source of truth
-│   └── prepare_model.py     # offline pipeline -> artifacts in models/
-├── notebooks/
-│   └── 01_exploration_modelisation.ipynb   # EDA, artifact build, evaluation
+├── src/                     # single source of truth — the deployed copies are generated
+│   ├── recommender.py       # inference core (numpy only)
+│   ├── app_ui.py            # the Streamlit interface, shared by all three solutions
+│   ├── prepare_model.py     # offline pipeline -> artifacts in models/
+│   ├── collaborative_surprise.py   # SVD artifacts (Surprise)
+│   ├── evaluate.py          # temporal-split evaluation, the reference measurement
+│   ├── experiments.py       # ranking strategies used by the notebooks
+│   ├── user_store{,_azure}.py      # registered readers: SQLite or Azure Table Storage
+│   └── tracking.py          # MLflow runs and model registry
+├── notebooks/               # 7 notebooks: exploration, then one per approach, then the final test
 ├── azure_function/          # serverless service (Python v2 programming model)
-│   ├── function_app.py
-│   └── shared_code/         # deployed copy of recommender.py + Blob access
-├── app/
-│   └── streamlit_app.py     # demo UI: user_id -> calls the Function -> 5 articles
-├── spaces/                  # standalone Hugging Face Space (embeds the core)
+│   ├── function_app.py      # endpoint + Blob input bindings for the freshness window
+│   └── shared_code/         # generated copy of recommender.py + Blob access
+├── app/                     # the two clients of the Azure solution
+│   ├── app_full.py          # full product interface, ranking served by the Function
+│   ├── streamlit_app.py     # minimal client: request, latency, raw response
+│   └── api_client.py        # presents the HTTP API as a Recommender
+├── spaces/                  # standalone Hugging Face Space (Docker SDK, embeds the core)
 ├── local/                   # standalone local solution — no cloud at all
-│   ├── app.py               # Streamlit app computing in-process
-│   └── recommender.py       # embedded copy of the core
+├── infra/                   # Terraform: the deployed Azure stack, validated in CI
 ├── scripts/
 │   ├── serve_local.py       # local endpoint, same contract as the Function (no Core Tools)
-│   ├── run_local.ps1        # one-command local stack: endpoint + Streamlit app
 │   ├── add_articles.py      # integrates new articles — projection, no retraining
-│   └── sync_recommender.py  # regenerates the deployed copies of the core
-├── tests/                   # unit tests on synthetic artifacts
-├── docs/                    # architecture, presentation, GxP/CSV pack
+│   ├── sync_recommender.py  # regenerates the deployed copies of the core
+│   ├── check_metrics.py     # quality gate against the versioned reference
+│   ├── check_secrets.py     # refuses a secret in clear text (CI + pre-push hook)
+│   ├── sweep_fraicheur.py   # the freshness measurement behind the headline figure
+│   ├── mesure_fuite.py      # reproduces the biased evaluation, to quantify it
+│   └── hooks/pre-push       # secrets on the pushed range, then the unit tests
+├── tests/                   # 79 unit tests on synthetic artifacts
+├── docs/                    # architecture, sequences, MLOps, deployment, GxP/CSV pack
 ├── data/                    # raw data (not versioned — see data/README.md)
-└── models/                  # generated artifacts
+└── models/                  # generated artifacts (not versioned, except the two measurements)
 ```
 
 ## Quick start
@@ -287,7 +297,7 @@ python -m pytest tests/ -q
 git config core.hooksPath scripts/hooks
 ```
 
-78 tests. Coverage: all five ranking strategies including the composition of `mix`,
+79 tests. Coverage: all five ranking strategies including the composition of `mix`,
 exclusion of already-read articles, the four-level fallback cascade and regional cold
 start, the freshness window (anchor robust to outlier timestamps, automatic widening,
 `fresh_only` toggle), the two SVD rating variants, artifact-cache freshness, robustness
@@ -309,11 +319,38 @@ python scripts/sync_recommender.py --check   # CI mode: fails if a copy is stale
 
 ## Azure deployment (summary)
 
-1. Upload the contents of `models/` to a Blob container (`models`).
-2. Create a Python Function App plus its Storage account.
-3. Set `AZURE_STORAGE_CONNECTION_STRING` and `MODELS_CONTAINER`; leave `MODELS_DIR` unset
-   in production (it is the local-development override).
-4. `func azure functionapp publish <app-name>` from `azure_function/`.
+1. Create the infrastructure — `terraform -chdir=infra apply`, or the manual `az`
+   sequence in the tutorial. Three resources: resource group, storage account,
+   Function on a Flex Consumption plan.
+2. Upload the contents of `models/` to the `models` Blob container.
+3. `func azure functionapp publish <app-name>` from `azure_function/`.
+
+App settings (`AZURE_STORAGE_CONNECTION_STRING`, `MODELS_CONTAINER`) are set by
+Terraform from the storage account's own attributes, so the connection string
+never exists in clear text anywhere. Leave `MODELS_DIR` unset in production — it
+is the local-development override.
+
+Replacing a **heavy** artifact needs a redeploy, not a restart: a restart does
+not guarantee that every instance drops its artifact cache. The freshness window
+is the exception — it arrives through a Blob input binding and applies without
+either. Details and the errors actually hit:
+[docs/deploiement_azure.md](docs/deploiement_azure.md).
+
+## Development flow
+
+`dev` is the working branch, `main` the release branch. CI runs on pushes to
+both and on every pull request; `main` is protected and requires the three checks
+(`tests`, `hygiene`, `terraform`) plus a pull request.
+
+```bash
+git config core.hooksPath scripts/hooks   # one-time, per clone
+```
+
+The pre-push hook refuses a push whose commits carry a secret, or whose unit
+tests fail — the last moment at which either is still a local matter. The
+`terraform` CI job runs `fmt -check` and `validate` without needing Azure
+credentials, which is what makes `infra/` a checked artifact rather than a
+documented intention.
 
 ## Documentation
 
@@ -323,6 +360,7 @@ python scripts/sync_recommender.py --check   # CI mode: fails if a copy is stale
 - [docs/deploiement_azure.md](docs/deploiement_azure.md) — **step-by-step Azure deployment**: resource creation through to a verified live endpoint, with the errors actually hit and their causes.
 - [docs/mlops.md](docs/mlops.md) — temporal split, MLflow tracking, model registry, metric gate, CI.
 - [docs/architecture.md](docs/architecture.md) — MVP architecture, alternatives considered, target architecture.
+- [infra/README.md](infra/README.md) — the Terraform stack: creating a fresh environment, or importing the existing one, and how to tell whether the code still describes reality.
 - [docs/sequences.md](docs/sequences.md) — UML sequence diagrams for the three deployments: where the ranking is computed, what a cold start costs, and how a just-registered reader is served by a stateless API.
 - [docs/release-v1.0.0.md](docs/release-v1.0.0.md) — what `v1.0.0` delivered and what it measured, as published on the release page.
 - `docs/gxp/` — GAMP 5 / CSV documentation pack (VP, URS, FS, RA, RTM, IQ/OQ/PQ, VSR), **DRAFT**.
