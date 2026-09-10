@@ -5,7 +5,7 @@ production strategy behind one interface, with an explicit cold-start cascade.
 Offline training / numpy-only inference keeps the deployed function
 ML-dependency-free; one core ships to an Azure Function (Blob artifacts), to a
 Hugging Face Space and to a network-free local app. Temporal-split evaluation,
-59 unit tests, MLOps guard rails, architecture and validation notes.
+87 unit tests, MLOps guard rails, architecture and validation notes.
 
 MVP for the **My Content** start-up: recommend **5 articles** per user, built on the
 public *News Portal User Interactions by Globo.com* dataset (no proprietary data yet).
@@ -100,7 +100,7 @@ articles): [docs/architecture.md](docs/architecture.md).
 │   ├── sweep_fraicheur.py   # the freshness measurement behind the headline figure
 │   ├── mesure_fuite.py      # reproduces the biased evaluation, to quantify it
 │   └── hooks/pre-push       # secrets on the pushed range, then the unit tests
-├── tests/                   # 79 unit tests on synthetic artifacts
+├── tests/                   # 87 unit tests on synthetic artifacts
 ├── docs/                    # architecture, sequences, MLOps, deployment, GxP/CSV pack
 ├── data/                    # raw data (not versioned — see data/README.md)
 └── models/                  # generated artifacts (not versioned, except the two measurements)
@@ -314,7 +314,7 @@ python -m pytest tests/ -q
 git config core.hooksPath scripts/hooks
 ```
 
-79 tests. Coverage: all five ranking strategies including the composition of `mix`,
+87 tests. Coverage: all five ranking strategies including the composition of `mix`,
 exclusion of already-read articles, the four-level fallback cascade and regional cold
 start, the freshness window (anchor robust to outlier timestamps, automatic widening,
 `fresh_only` toggle), the two SVD rating variants, artifact-cache freshness, robustness
