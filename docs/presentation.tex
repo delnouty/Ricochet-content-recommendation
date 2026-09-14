@@ -1,13 +1,13 @@
 % Support de soutenance Ricochet — Beamer.
 %
 % Structure imposée par le brief, et budget de temps respecté par le nombre de
-% diapositives (23 au total, ouverture et clôture comprises) :
+% diapositives (24 au total, ouverture et clôture comprises) :
 %
 %   | Partie                                | Temps  | Diapositives |
 %   | Contexte et description fonctionnelle |  2 min |      2       |
 %   | Approches de modélisation testées     | 10 min |      9       |
 %   | Fonctionnalités du système dans l'app |  6 min |      5       |
-%   | Architecture retenue, cible           |  3 min |      4       |
+%   | Architecture retenue, cible           |  4 min |      5       |
 %   | Démonstration de l'application        |  2 min |      1       |
 %
 % Les cinq éléments exigés par le brief et où ils se trouvent :
@@ -553,7 +553,7 @@
   \end{itemize}
 \end{frame}
 
-% ═══════════════ PARTIE 3 — Architecture retenue et cible (3 min, 4 diapos) ══════════
+% ═══════════════ PARTIE 3 — Architecture retenue et cible (4 min, 5 diapos) ══════════
 \begin{frame}{Partie 3 — Architecture retenue : l'architecture 2}
   \framesubtitle{Serverless \emph{sans} API dédiée — la Function lit Blob Storage elle-même}
   \centering
@@ -583,14 +583,58 @@
     \draw[-{Latex[length=2mm]}, accent, thick, dashed]  (cold) -- (fn);
   \end{tikzpicture}
 
-  \vspace{0.5em}
+  \vspace{0.4em}
   \raggedright\scriptsize
-  \pointfort{Deux accès à Blob Storage, pas un.} Le \emph{binding} relit son blob
-  à chaque invocation : c'est ce qu'il faut pour 23 Ko qui changent toutes les
-  heures — la fenêtre est mise à jour \textbf{sans redémarrage}. Appliqué aux
-  253 Mo, il supprimerait le cache et coûterait \textbf{8 s par appel au lieu de
-  0,2 s}, soit 40 fois plus. Le choix n'est pas « binding ou SDK », c'est
-  « binding \emph{là où} sa relecture est un avantage ».
+  \begin{itemize}\itemsep2pt
+    \item \pointfort{Sans état.} La Function ne conserve rien entre deux requêtes :
+          le profil d'un lecteur qu'elle ne connaît pas arrive dans le paramètre
+          \texttt{history} de l'appel.
+    \item \pointfort{Mais pas sans mémoire.} L'instance \texttt{Recommender} est un
+          \textbf{singleton} réutilisé d'une invocation à l'autre : les 253 Mo sont
+          lus une seule fois par instance, au démarrage à froid, après
+          \textbf{découverte dynamique} du conteneur — le chargeur énumère les
+          blobs, il ne suit pas une liste figée.
+    \item \pointfort{Deux accès, pas un.} Le \emph{binding} relit son blob à chaque
+          invocation : ce qu'il faut pour 23 Ko qui changent toutes les heures.
+          Appliqué aux 253 Mo il supprimerait le cache — \textbf{8 s par appel au
+          lieu de 0,2 s}, 40 fois plus.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Ce qui sépare un service d'une démonstration}
+  \framesubtitle{Quatre défaillances silencieuses, et le garde-fou de chacune}
+  \centering
+  \scriptsize
+  \begin{tabular}{@{}p{3.3cm}p{5.1cm}p{4.2cm}@{}}
+    \toprule
+    \textbf{Défaillance} & \textbf{Garde-fou} & \textbf{Preuve} \\
+    \midrule
+    Dérive d'artefact\newline\textcolor{gris}{\tiny observée en production}
+      & validité du cache jugée sur la taille \textbf{et} la date du blob — un
+        modèle reconstruit de taille identique est retéléchargé
+      & \texttt{test\_meme\_taille\_}\newline\texttt{mais\_blob\_plus\_recent} \\[2pt]
+    Cache périmé\newline\textcolor{gris}{\tiny observée en production}
+      & le conteneur est \textbf{énuméré} à chaque démarrage ; une liste figée
+        avait fait manquer les artefacts ajoutés après elle
+      & \texttt{list\_blobs()}, trois artefacts requis contrôlés \\[2pt]
+    Catalogue incohérent
+      & tout identifiant hors catalogue est filtré, au chargement \emph{et} à
+        chaque requête — sinon l'indexation échoue
+      & \texttt{test\_historique\_hors\_}\newline\texttt{catalogue\_filtre} \\[2pt]
+    Interférence entre requêtes concurrentes
+      & la surcharge \texttt{history} vit dans un \texttt{threading.local},
+        remise à zéro en \texttt{finally} : le profil d'un appel ne fuit pas
+        vers un autre
+      & isolation par requête, \texttt{src/recommender.py} \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.6em}
+  \raggedright\scriptsize
+  \pointfort{Aucune de ces quatre défaillances ne lève d'erreur.} Le service
+  continue de répondre 200, avec de mauvaises recommandations — les deux
+  premières ont été découvertes en comparant la réponse déployée à la réponse
+  locale, pas par une exception.
 \end{frame}
 
 \begin{frame}{Le service et l'application qui l'appelle}
