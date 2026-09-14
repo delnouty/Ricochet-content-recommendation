@@ -116,33 +116,55 @@
   \end{itemize}
 \end{frame}
 
-\begin{frame}{L'application en quatre gestes}
-  \framesubtitle{Description fonctionnelle — ce que le lecteur peut faire}
+\begin{frame}{Description fonctionnelle}
+  \framesubtitle{Ce que le service fait, du point de vue de l'utilisateur}
   \begin{columns}[T]
-    \begin{column}{0.52\textwidth}
+    \begin{column}{0.56\textwidth}
       \scriptsize
-      \begin{enumerate}\itemsep4pt
-        \item \textbf{Recevoir 5 articles.} Le lecteur est choisi, le service
-              renvoie cinq identifiants — avec leur note en étoiles, leur nombre
-              de lecteurs, leur catégorie et leur date.
-        \item \textbf{Marquer un article comme lu.} La lecture est enregistrée,
-              le profil s'enrichit et la liste suivante change —
-              \pointfort{sans ré-entraînement}.
-        \item \textbf{Parcourir le catalogue.} 364 047 articles, quatre tris,
-              filtre par note, articles déjà lus masqués.
-        \item \textbf{S'inscrire.} Un nouveau lecteur reçoit un identifiant, une
-              région et un profil de départ, et il est recommandé
-              \pointfort{immédiatement}.
-      \end{enumerate}
+      \textcolor{accent}{\textbf{Le service}} — pour un lecteur donné, il renvoie
+      les \textbf{N articles} les plus susceptibles de l'intéresser.
+
+      \vspace{4pt}
+      \begin{tabular}{@{}ll@{}}
+        \textbf{Entrées} & \texttt{user\_id} \textcolor{gris}{requis} \\
+                         & \texttt{n} \textcolor{gris}{défaut 5} \textperiodcentered\
+                           \texttt{method} \textcolor{gris}{défaut mixte} \\
+                         & \texttt{region} \textperiodcentered\ \texttt{history}
+                           \textperiodcentered\ \texttt{fresh\_only}
+                           \textcolor{gris}{facultatifs} \\
+        \textbf{Sortie}  & N identifiants d'articles, classés \\
+      \end{tabular}
+
+      \vspace{5pt}
+      \begin{itemize}\itemsep2pt
+        \item \textbf{Cinq stratégies} au choix : popularité, contenu,
+              collaboratif ALS, SVD, hybride — la \pointfort{mixte} par défaut.
+        \item \textbf{Lecteur nouveau ou sans historique exploitable} : articles
+              populaires, \textbf{adaptés à sa région} si elle est connue.
+        \item \textbf{Priorité au contenu récent} : la fenêtre de recommandation
+              est recalculée périodiquement pour tenir compte des articles
+              publiés depuis.
+        \item \pointfort{Jamais de liste vide}, quelle que soit la requête.
+      \end{itemize}
     \end{column}
-    \begin{column}{0.44\textwidth}
+    \begin{column}{0.40\textwidth}
+      \scriptsize
+      \textcolor{accent}{\textbf{L'application}} qui l'appelle permet de :
+      \begin{itemize}\itemsep2pt
+        \item choisir un lecteur et obtenir ses articles ;
+        \item \textbf{marquer un article comme lu} — le profil s'enrichit, la
+              liste suivante change, \pointfort{sans ré-entraînement} ;
+        \item parcourir le catalogue (364 047 articles) ;
+        \item \textbf{inscrire} un nouveau lecteur, recommandé immédiatement.
+      \end{itemize}
+      \vspace{3pt}
       \centering
-      \includegraphics[width=\linewidth]{figures/app_recommandations.png}
+      \includegraphics[width=0.96\linewidth]{figures/app_recommandations.png}
     \end{column}
   \end{columns}
-  \aretenir{Une seule fonction est demandée — \pointfort{cinq articles par
-    lecteur} — mais elle doit répondre aussi pour un lecteur inscrit il y a une
-    seconde, dont le service ne sait rien.}
+  \aretenir{Le service est \pointfort{sans état} : pour un lecteur qu'il ne
+    connaît pas — inscrit une seconde plus tôt — c'est l'appelant qui transmet
+    l'historique dans la requête.}
 \end{frame}
 
 % ═══════════════════════ PARTIE 1 — Modélisation (10 min, 9 diapos) ════════
