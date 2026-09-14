@@ -12,7 +12,9 @@
 %
 % Les cinq éléments exigés par le brief et où ils se trouvent :
 %   1. description fonctionnelle .... « L'application en quatre gestes »
-%   2. modèles + avantages/inconv. .. « Approche 1/2/3 », colonnes vert/rouge
+%   2. modèles + avantages/inconv. .. les 3 diapos de modèle, colonnes
+%                                      vert/rouge ; popularité et mixte traitées
+%                                      dans les résultats
 %   3. schéma de l'archi retenue .... « Partie 3 — Architecture retenue »
 %                                      (le binding y est DANS le schéma)
 %   4. système de reco utilisé ...... « Le système de recommandation retenu »
@@ -159,11 +161,17 @@
     Mixte            & combinaison sur les 5 places              & --- \\
     \bottomrule
   \end{tabular}
+  \vspace{0.7em}
+  \raggedright\scriptsize
+  Les trois approches \textbf{personnalisées} sont détaillées dans les trois
+  diapositives suivantes. La \textbf{popularité} traverse tous les résultats —
+  c'est elle que mesure « la fraîcheur pèse plus que le modèle ». La stratégie
+  \textbf{mixte}, retenue en production, clôt cette partie.
   \aretenir{La popularité sert de \pointfort{référence à battre} : elle ne
     personnalise rien, donc toute approche plus complexe doit faire mieux qu'elle.}
 \end{frame}
 
-\begin{frame}{Approche 1 — Filtrage par le contenu}
+\begin{frame}{Filtrage par le contenu}
   \framesubtitle{Similarité des embeddings d'articles}
   \centering
   \begin{tikzpicture}[node distance=8mm, every node/.style={font=\scriptsize},
@@ -200,7 +208,7 @@
   \end{columns}
 \end{frame}
 
-\begin{frame}{Approche 2 — Collaboratif ALS (\texttt{implicit})}
+\begin{frame}{Collaboratif ALS (\texttt{implicit})}
   \framesubtitle{Factorisation pour feedback implicite}
   \scriptsize
   Toutes les cases vides sont traitées comme des \textbf{négatifs pondérés} :
@@ -234,7 +242,7 @@
     des optima partiels.}
 \end{frame}
 
-\begin{frame}{Approche 3 — Collaboratif SVD (\texttt{Surprise})}
+\begin{frame}{Collaboratif SVD (\texttt{Surprise})}
   \framesubtitle{Trois définitions de note, trois résultats}
   \centering
   \scriptsize
