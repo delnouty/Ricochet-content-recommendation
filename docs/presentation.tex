@@ -1,19 +1,20 @@
 % Support de soutenance Ricochet — Beamer.
 %
 % Structure imposée par le brief, et budget de temps respecté par le nombre de
-% diapositives (22 au total, ouverture et clôture comprises) :
+% diapositives (23 au total, ouverture et clôture comprises) :
 %
 %   | Partie                                | Temps  | Diapositives |
 %   | Contexte et description fonctionnelle |  2 min |      2       |
 %   | Approches de modélisation testées     | 10 min |      9       |
 %   | Fonctionnalités du système dans l'app |  6 min |      5       |
-%   | Architecture technique et cible       |  3 min |      3       |
+%   | Architecture retenue, cible           |  3 min |      4       |
 %   | Démonstration de l'application        |  2 min |      1       |
 %
 % Les cinq éléments exigés par le brief et où ils se trouvent :
 %   1. description fonctionnelle .... « L'application en quatre gestes »
 %   2. modèles + avantages/inconv. .. « Approche 1/2/3 », colonnes vert/rouge
-%   3. schéma de l'archi retenue .... « Partie 3 — Architecture technique »
+%   3. schéma de l'archi retenue .... « Partie 3 — Architecture retenue »
+%                                      (le binding y est DANS le schéma)
 %   4. système de reco utilisé ...... « Le système de recommandation retenu »
 %   5. schéma de l'archi cible ...... « Architecture cible » (le schéma, pas
 %                                      le tableau qui le suit)
@@ -142,7 +143,7 @@
     seconde, dont le service ne sait rien.}
 \end{frame}
 
-% ═══════════════════════ PARTIE 1 — Modélisation (10 min, 8 diapos) ════════
+% ═══════════════════════ PARTIE 1 — Modélisation (10 min, 9 diapos) ════════
 \begin{frame}{Partie 1 — Les cinq approches testées}
   \framesubtitle{10 minutes \textperiodcentered\ comment chacune classe les articles}
   \centering
@@ -552,9 +553,49 @@
   \end{itemize}
 \end{frame}
 
-% ═══════════════ PARTIE 3 — Architecture cible (2 min, 2 diapos) ══════════
-\begin{frame}{Partie 3 — Architecture technique}
-  \framesubtitle{2 minutes \textperiodcentered\ un cœur, trois déploiements indépendants}
+% ═══════════════ PARTIE 3 — Architecture retenue et cible (3 min, 4 diapos) ══════════
+\begin{frame}{Partie 3 — Architecture retenue : l'architecture 2}
+  \framesubtitle{Serverless \emph{sans} API dédiée — la Function lit Blob Storage elle-même}
+  \centering
+  \begin{tikzpicture}[every node/.style={font=\scriptsize, align=center},
+      app/.style={draw=gris, thick, rounded corners, text width=2.4cm,
+                  minimum height=1.2cm, fill=clair, text=primary},
+      fn/.style={draw=primary, very thick, rounded corners, text width=3.9cm,
+                 minimum height=1.6cm, fill=primary, text=white},
+      hot/.style={draw=accent2, very thick, rounded corners, text width=3.7cm,
+                  minimum height=1.15cm, fill=accent2, text=white},
+      cold/.style={draw=accent, thick, rounded corners, text width=3.7cm,
+                   minimum height=1.15cm, fill=accent, text=white}]
+
+    \node[fn] (fn) {\textbf{Azure Function}\\\texttt{/api/recommend}\\
+                    Recommender — \textbf{numpy seul}};
+    \node[app, left=12mm of fn] (app) {Application\\locale};
+    \node[hot,  right=14mm of fn, yshift=11mm]  (hot)
+      {\textbf{Fraîcheur} — 23 Ko\\\textbf{blob input binding}\\relu à \textbf{chaque appel} · 2 ms};
+    \node[cold, right=14mm of fn, yshift=-11mm] (cold)
+      {\textbf{Artefacts lourds} — 253 Mo\\SDK + cache\\démarrage à froid · 8 s};
+
+    \draw[-{Latex[length=2mm]}, gris, thick]
+      (app.north east) -- node[above, font=\tiny, text=primary] {\texttt{user\_id}} (fn.north west);
+    \draw[-{Latex[length=2mm]}, gris, thick]
+      (fn.south west) -- node[below, font=\tiny, text=primary] {5 \texttt{article\_id}} (app.south east);
+    \draw[-{Latex[length=2.4mm]}, accent2, ultra thick] (hot)  -- (fn);
+    \draw[-{Latex[length=2mm]}, accent, thick, dashed]  (cold) -- (fn);
+  \end{tikzpicture}
+
+  \vspace{0.5em}
+  \raggedright\scriptsize
+  \pointfort{Deux accès à Blob Storage, pas un.} Le \emph{binding} relit son blob
+  à chaque invocation : c'est ce qu'il faut pour 23 Ko qui changent toutes les
+  heures — la fenêtre est mise à jour \textbf{sans redémarrage}. Appliqué aux
+  253 Mo, il supprimerait le cache et coûterait \textbf{8 s par appel au lieu de
+  0,2 s}, soit 40 fois plus. Le choix n'est pas « binding ou SDK », c'est
+  « binding \emph{là où} sa relecture est un avantage ».
+\end{frame}
+
+\begin{frame}{Le même cœur, trois déploiements}
+  \framesubtitle{2 minutes \textperiodcentered\ une seule source de vérité,
+    trois copies générées}
   \centering
   \begin{tikzpicture}[every node/.style={font=\scriptsize, align=center, text=white},
       bloc/.style={draw=primary, thick, rounded corners, text width=2.9cm,
@@ -579,11 +620,9 @@
           \textbf{générées}, et la CI vérifie qu'elles sont à jour.
     \item À l'inférence, aucune bibliothèque d'apprentissage : \pointfort{numpy
           seul}. scikit-learn, implicit et Surprise ne servent qu'hors-ligne.
-    \item Architecture 2 retenue pour le MVP : la Function lit Blob Storage sans
-          API intermédiaire, avec \pointfort{deux accès selon la cadence} —
-          \emph{binding} sur les 23~Ko de fraîcheur, relus à chaque appel donc
-          mise à jour horaire sans redémarrage ; SDK avec cache sur les 253~Mo
-          d'artefacts lourds, où le binding coûterait 40 fois plus par requête.
+    \item Ces trois-là sont des \textbf{déploiements}, pas trois architectures :
+          l'architecture retenue est celle de la diapositive précédente, et
+          Hugging Face comme le local en sont des portages.
   \end{itemize}
 \end{frame}
 
