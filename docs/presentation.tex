@@ -1,21 +1,32 @@
 % Support de soutenance Ricochet — Beamer.
 %
 % Structure imposée par le brief, et budget de temps respecté par le nombre de
-% diapositives :
+% diapositives (22 au total, ouverture et clôture comprises) :
 %
 %   | Partie                                | Temps  | Diapositives |
-%   | Approches de modélisation testées     | 10 min |      8       |
+%   | Contexte et description fonctionnelle |  2 min |      2       |
+%   | Approches de modélisation testées     | 10 min |      9       |
 %   | Fonctionnalités du système dans l'app |  6 min |      5       |
-%   | Architecture technique cible          |  2 min |      2       |
+%   | Architecture technique et cible       |  3 min |      3       |
 %   | Démonstration de l'application        |  2 min |      1       |
 %
-% Compilation (deux passes pour la table des matières) :
-%   latexmk -pdf -xelatex docs/presentation.tex
-% ou :
-%   xelatex -output-directory=docs docs/presentation.tex   (deux fois)
+% Les cinq éléments exigés par le brief et où ils se trouvent :
+%   1. description fonctionnelle .... « L'application en quatre gestes »
+%   2. modèles + avantages/inconv. .. « Approche 1/2/3 », colonnes vert/rouge
+%   3. schéma de l'archi retenue .... « Partie 3 — Architecture technique »
+%   4. système de reco utilisé ...... « Le système de recommandation retenu »
+%   5. schéma de l'archi cible ...... « Architecture cible » (le schéma, pas
+%                                      le tableau qui le suit)
 %
-% XeLaTeX plutôt que pdfLaTeX : le texte contient des caractères (★, ×, —) et une
-% typographie française qui passent mal en encodage historique.
+% Compilation (deux passes pour la table des matières) :
+%   latexmk -pdf -lualatex docs/presentation.tex
+% ou :
+%   lualatex -output-directory=docs docs/presentation.tex   (deux fois)
+%
+% ⚠️ NE PAS utiliser pdflatex : fontspec exige XeTeX ou LuaTeX, et pdflatex
+% supprime le PDF existant avant d'échouer. XeLaTeX convient aussi — le texte
+% contient des caractères (★, ×, —) et une typographie française qui passent mal
+% en encodage historique.
 
 \documentclass[aspectratio=169, 11pt]{beamer}
 
@@ -102,6 +113,35 @@
   \end{itemize}
 \end{frame}
 
+\begin{frame}{L'application en quatre gestes}
+  \framesubtitle{Description fonctionnelle — ce que le lecteur peut faire}
+  \begin{columns}[T]
+    \begin{column}{0.52\textwidth}
+      \scriptsize
+      \begin{enumerate}\itemsep4pt
+        \item \textbf{Recevoir 5 articles.} Le lecteur est choisi, le service
+              renvoie cinq identifiants — avec leur note en étoiles, leur nombre
+              de lecteurs, leur catégorie et leur date.
+        \item \textbf{Marquer un article comme lu.} La lecture est enregistrée,
+              le profil s'enrichit et la liste suivante change —
+              \pointfort{sans ré-entraînement}.
+        \item \textbf{Parcourir le catalogue.} 364 047 articles, quatre tris,
+              filtre par note, articles déjà lus masqués.
+        \item \textbf{S'inscrire.} Un nouveau lecteur reçoit un identifiant, une
+              région et un profil de départ, et il est recommandé
+              \pointfort{immédiatement}.
+      \end{enumerate}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \centering
+      \includegraphics[width=\linewidth]{figures/app_recommandations.png}
+    \end{column}
+  \end{columns}
+  \aretenir{Une seule fonction est demandée — \pointfort{cinq articles par
+    lecteur} — mais elle doit répondre aussi pour un lecteur inscrit il y a une
+    seconde, dont le service ne sait rien.}
+\end{frame}
+
 % ═══════════════════════ PARTIE 1 — Modélisation (10 min, 8 diapos) ════════
 \begin{frame}{Partie 1 — Les cinq approches testées}
   \framesubtitle{10 minutes \textperiodcentered\ comment chacune classe les articles}
@@ -161,27 +201,36 @@
 
 \begin{frame}{Approche 2 — Collaboratif ALS (\texttt{implicit})}
   \framesubtitle{Factorisation pour feedback implicite}
-  \small
-  \begin{itemize}
-    \item Traite toutes les cases vides comme des \textbf{négatifs pondérés} :
-          formulation adaptée à des clics, pas à des notes.
-    \item Deux réglages balayés \textbf{séparément} sur validation : la fenêtre
-          d'entraînement (72 h : 0,0200 contre 0,0175 à 24 h) puis le nombre de
-          facteurs (16 : 0,0345 contre 0,0175 à 50).
-    \item Combiner les deux gagnants — 72 h \emph{et} 16 facteurs — paraissait
-          évident. Le balayage \pointfort{croisé} dit le contraire :
-      \begin{itemize}
-        \item 24 h + 16 facteurs : \textbf{0,0345} — retenu ;
-        \item 72 h + 16 facteurs : \textbf{0,0110} — la pire des quatre.
+  \scriptsize
+  Toutes les cases vides sont traitées comme des \textbf{négatifs pondérés} :
+  une formulation adaptée à des clics, pas à des notes.
+
+  \vspace{0.8em}
+  \begin{columns}[t]
+    \begin{column}{0.48\textwidth}
+      \textcolor{vert}{\textbf{Avantages}}
+      \begin{itemize}\itemsep2pt
+        \item capte des goûts \textbf{latents} qu'aucune similarité de contenu ne
+              voit ;
+        \item effet de surprise : recommande hors du thème déjà lu ;
+        \item personnalisation \textbf{95 \%}.
       \end{itemize}
-    \item Un modèle à 16 facteurs a besoin d'un signal \emph{dense} ; élargir à
-          72 h dilue les co-lectures et le prive de cette densité. Les réglages
-          \pointfort{interagissent} : on ne juxtapose pas des optima partiels.
-    \item Résultat sur test, configuration retenue : HitRate@5 = \textbf{0,0415},
-          personnalisation 95 \%.
-  \end{itemize}
-  \aretenir{Limite structurelle : un article publié il y a deux heures n'a presque
-    aucune co-lecture — le collaboratif ne peut pas le proposer.}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \textcolor{red!70!black}{\textbf{Inconvénients}}
+      \begin{itemize}\itemsep2pt
+        \item HitRate@5 sur test = \textbf{0,0415} ;
+        \item \textbf{cold start} : inutile pour un lecteur ou un article nouveau ;
+        \item limite structurelle — un article publié il y a deux heures n'a
+              presque aucune co-lecture, le collaboratif ne peut pas le proposer ;
+        \item réglages sensibles et \pointfort{couplés} entre eux.
+      \end{itemize}
+    \end{column}
+  \end{columns}
+  \aretenir{Balayés \textbf{séparément} sur validation, les deux gagnants étaient
+    72 h et 16 facteurs. Croisés, ils donnent \textbf{0,0110} — la pire des quatre
+    combinaisons ; 24 h + 16 facteurs donne \textbf{0,0345}. On ne juxtapose pas
+    des optima partiels.}
 \end{frame}
 
 \begin{frame}{Approche 3 — Collaboratif SVD (\texttt{Surprise})}
@@ -203,17 +252,30 @@
 
   \vspace{0.8em}
   \raggedright\scriptsize
-  \begin{itemize}\itemsep3pt
-    \item Même bibliothèque, même algorithme : c'est la \pointfort{formulation du
-          problème} qui change tout, pas l'outil.
-    \item Les étoiles échouent parce que la note ne dépend que de l'article : le
-          biais article capte tout le signal, et le modèle apprend « quels articles
-          sont lus », pas « qui lit quoi ».
-    \item Les trois lignes sont mesurées sur la \textbf{validation}. Sur le test,
-          la meilleure variante retombe à \textbf{0,0220} — un facteur 3,7. Le
-          réglage \pointfort{ne s'est pas reproduit}, et c'est ce qu'une période
-          de test intacte sert à révéler.
-  \end{itemize}
+  \begin{columns}[t]
+    \begin{column}{0.48\textwidth}
+      \textcolor{vert}{\textbf{Avantages}}
+      \begin{itemize}\itemsep2pt
+        \item bien posée — binaire + 4 négatifs — c'est la meilleure des trois
+              variantes sur validation ;
+        \item implémentation directe, entraînement rapide, peu de réglages.
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \textcolor{red!70!black}{\textbf{Inconvénients}}
+      \begin{itemize}\itemsep2pt
+        \item \pointfort{ne se reproduit pas} : 0,0815 en validation, mais
+              \textbf{0,0220} sur test — un facteur 3,7 ;
+        \item les étoiles ne classent pas du tout (0,0015) : la note ne dépend que
+              de l'article, le modèle apprend « quels articles sont lus », pas
+              « qui lit quoi » ;
+        \item même cold start que l'ALS ; personnalisation 34 \% seulement.
+      \end{itemize}
+    \end{column}
+  \end{columns}
+  \aretenir{Même bibliothèque, même algorithme : c'est la \pointfort{formulation
+    du problème} qui change tout, pas l'outil. Et c'est une période de test
+    intacte qui révèle qu'un réglage ne s'est pas reproduit.}
 \end{frame}
 
 \begin{frame}{Comment nous avons su que les premiers chiffres étaient faux}
@@ -309,6 +371,46 @@
           moins précis que la popularité \emph{et} vingt fois moins couvrants que
           le contenu. Disponibles dans l'application, ils ne sont pas servis.
   \end{itemize}
+\end{frame}
+
+\begin{frame}{Le système de recommandation retenu}
+  \framesubtitle{Ce qui tourne en production : la stratégie « mixte »}
+  \centering
+  \begin{tikzpicture}[every node/.style={font=\scriptsize, align=center},
+      place/.style={draw=primary, thick, rounded corners, text width=1.5cm,
+                    minimum height=0.85cm, text=white}]
+    \node[place, fill=accent]  (p1) {1};
+    \node[place, fill=accent, right=2mm of p1]  (p2) {2};
+    \node[place, fill=accent, right=2mm of p2]  (p3) {3};
+    \node[place, fill=accent, right=2mm of p3]  (p4) {4};
+    \node[place, fill=accent2, right=2mm of p4] (p5) {5};
+    \node[below=1mm of p2.south east, font=\scriptsize, text=primary]
+      {\textbf{4 places} — les plus lus de la \textbf{dernière heure}};
+    \node[below=1mm of p5.south, font=\scriptsize, text=primary, text width=2.6cm]
+      {\textbf{1 place} — contenu, vivier 6 h};
+  \end{tikzpicture}
+
+  \vspace{1.4em}
+  \raggedright\scriptsize
+  \begin{columns}[t]
+    \begin{column}{0.48\textwidth}
+      \textcolor{vert}{\textbf{Pourquoi ce partage}}
+      \begin{itemize}\itemsep2pt
+        \item la place donnée au contenu ne coûte pas de justesse mesurable ;
+        \item elle multiplie par \textbf{38} la part de catalogue exposée ;
+        \item meilleur compromis justesse / couverture des cinq approches.
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \textcolor{accent}{\textbf{Jamais de liste vide}}
+      \begin{itemize}\itemsep2pt
+        \item cascade de repli à quatre niveaux : région $\cap$ fraîcheur,
+              puis fraîcheur, puis région, puis tout l'historique ;
+        \item \texttt{history} transmis dans la requête : un lecteur inconnu du
+              service est tout de même personnalisé.
+      \end{itemize}
+    \end{column}
+  \end{columns}
 \end{frame}
 
 % ═════════════════ PARTIE 2 — Fonctionnalités (6 min, 5 diapos) ═══════════
@@ -480,13 +582,60 @@
     \item Architecture 2 retenue pour le MVP : la Function lit Blob Storage sans
           API intermédiaire, avec \pointfort{deux accès selon la cadence} —
           \emph{binding} sur les 23~Ko de fraîcheur, relus à chaque appel donc
-          mise à jour horaire sans redémarrage ; SDK avec cache sur les 254~Mo
+          mise à jour horaire sans redémarrage ; SDK avec cache sur les 253~Mo
           d'artefacts lourds, où le binding coûterait 40 fois plus par requête.
   \end{itemize}
 \end{frame}
 
 \begin{frame}{Architecture cible}
   \framesubtitle{Absorber les nouveaux articles et les nouveaux lecteurs}
+  \centering
+  \begin{tikzpicture}[every node/.style={font=\tiny, align=center},
+      src/.style={draw=gris, thick, rounded corners, text width=1.9cm,
+                  minimum height=0.62cm, fill=clair, text=primary},
+      trt/.style={draw=accent, thick, rounded corners, text width=2.9cm,
+                  minimum height=0.62cm, fill=accent, text=white},
+      sto/.style={draw=accent2, thick, rounded corners, text width=2.3cm,
+                  minimum height=0.62cm, fill=accent2, text=white},
+      fl/.style={-{Latex[length=1.5mm]}, gris, thick}]
+
+    \node[src] (clic) {Clics des lecteurs};
+    \node[trt, right=4mm of clic] (ing) {Event Hub $\rightarrow$ Function d'ingestion};
+    \node[sto, right=4mm of ing]  (prof) {Store de profils};
+
+    \node[src, below=3.5mm of clic] (art)  {Nouvel article};
+    \node[trt, below=3.5mm of ing]  (proj) {Embedding $\rightarrow$ projection ACP persistée};
+    \node[sto, below=3.5mm of prof] (cat)  {Catalogue (Blob)};
+
+    \node[src, below=3.5mm of art]  (plan) {Planificateur};
+    \node[trt, below=3.5mm of proj] (als)  {Ré-entraînement ALS par lot};
+    \node[sto, below=3.5mm of cat]  (fact) {Facteurs versionnés};
+
+    \node[draw=primary, very thick, rounded corners, fill=primary, text=white,
+          text width=7.4cm, minimum height=0.75cm, below=7mm of als] (api)
+      {\textbf{API de recommandation dédiée} — architecture 1\\
+       mise à l'échelle \textperiodcentered\ cache \textperiodcentered\ versionnage
+       \textperiodcentered\ A/B};
+    \node[src, below=3.5mm of api, text width=2.6cm] (apps) {Applications clientes};
+
+    \draw[fl] (clic) -- (ing);  \draw[fl] (ing)  -- (prof);
+    \draw[fl] (art)  -- (proj); \draw[fl] (proj) -- (cat);
+    \draw[fl] (plan) -- (als);  \draw[fl] (als)  -- (fact);
+    \draw[fl] (prof.south) -- (api.north);
+    \draw[fl] (cat.south)  -- (api.north);
+    \draw[fl] (fact.south) -- (api.north);
+    \draw[fl] (api) -- (apps);
+  \end{tikzpicture}
+
+  \vspace{0.5em}
+  \raggedright\scriptsize
+  \pointfort{Seule la ligne du bas impose un ré-entraînement.} Les deux besoins
+  immédiats — un article visible tout de suite, un lecteur servi dès son premier
+  clic — passent par les deux premières lignes, sans ré-apprentissage.
+\end{frame}
+
+\begin{frame}{Architecture cible — ce que coûte chaque nouveauté}
+  \framesubtitle{Latence atteignable et besoin de ré-entraînement}
   \centering
   \scriptsize
   \begin{tabular}{@{}lllc@{}}
