@@ -593,36 +593,33 @@
   « binding \emph{là où} sa relecture est un avantage ».
 \end{frame}
 
-\begin{frame}{Le même cœur, trois déploiements}
+\begin{frame}{Le service et l'application qui l'appelle}
   \framesubtitle{2 minutes \textperiodcentered\ une seule source de vérité,
-    trois copies générées}
+    des copies générées}
   \centering
   \begin{tikzpicture}[every node/.style={font=\scriptsize, align=center, text=white},
       bloc/.style={draw=primary, thick, rounded corners, text width=2.9cm,
                    minimum height=1.3cm}]
     \node[bloc, fill=primary, text width=5cm, minimum height=0.9cm] (art)
       {Artefacts produits hors-ligne (ACP, ALS, SVD, fenêtres)};
-    \node[bloc, fill=accent,  below left=1cm and 0.3cm of art] (az)
-      {Azure Function\\+ Blob Storage\\\vspace{2pt}en ligne, 0,2 s};
-    \node[bloc, fill=accent2, below=1cm of art] (hf)
-      {Hugging Face Space\\+ HF Hub\\\vspace{2pt}démo publique};
-    \node[bloc, fill=vert, below right=1cm and 0.3cm of art] (loc)
-      {Application locale\\artefacts sur disque\\\vspace{2pt}aucun cloud};
+    \node[bloc, fill=accent,  below left=1cm and 0.6cm of art] (az)
+      {Azure Function\\+ Blob Storage\\\vspace{2pt}\textbf{architecture retenue}};
+    \node[bloc, fill=vert, below right=1cm and 0.6cm of art] (loc)
+      {Application locale\\qui l'appelle\\\vspace{2pt}interface de démonstration};
     \draw[-{Latex[length=2mm]}, gris, thick] (art) -- (az);
-    \draw[-{Latex[length=2mm]}, gris, thick] (art) -- (hf);
     \draw[-{Latex[length=2mm]}, gris, thick] (art) -- (loc);
   \end{tikzpicture}
 
   \vspace{0.6em}
   \raggedright\scriptsize
   \begin{itemize}\itemsep3pt
-    \item Même cœur de recommandation dans les trois : les copies déployées sont
-          \textbf{générées}, et la CI vérifie qu'elles sont à jour.
+    \item Les mêmes artefacts hors-ligne alimentent le service et l'application :
+          les copies déployées du cœur sont \textbf{générées} depuis \texttt{src/},
+          et la CI vérifie qu'elles sont à jour.
     \item À l'inférence, aucune bibliothèque d'apprentissage : \pointfort{numpy
           seul}. scikit-learn, implicit et Surprise ne servent qu'hors-ligne.
-    \item Ces trois-là sont des \textbf{déploiements}, pas trois architectures :
-          l'architecture retenue est celle de la diapositive précédente, et
-          Hugging Face comme le local en sont des portages.
+    \item L'application ne calcule rien : elle appelle l'endpoint et affiche les
+          cinq identifiants — c'est bien \textbf{la Function} qui recommande.
   \end{itemize}
 \end{frame}
 
