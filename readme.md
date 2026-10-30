@@ -153,6 +153,17 @@ the PCA over the whole catalogue and invalidating every stored vector. `project_
 uses them to embed a new article in minutes, numpy-only — see
 [docs/architecture.md](docs/architecture.md) §4.b.
 
+**Or skip the build and download the published artifacts** — the model is public on
+the Hugging Face Hub: <https://huggingface.co/DaryaEL/ricochet-models>
+
+```powershell
+pip install huggingface_hub
+python -c "from huggingface_hub import snapshot_download; snapshot_download('DaryaEL/ricochet-models', local_dir='models')"
+```
+
+The Hub is only a download source for the model files. Nothing in the Azure solution
+calls it at run time.
+
 ### 3. Run the local solution — no cloud, no HTTP
 
 ```powershell
@@ -339,8 +350,31 @@ python scripts/sync_recommender.py --check   # CI mode: fails if a copy is stale
 1. Create the infrastructure — `terraform -chdir=infra apply`, or the manual `az`
    sequence in the tutorial. Three resources: resource group, storage account,
    Function on a Flex Consumption plan.
-2. Upload the contents of `models/` to the `models` Blob container.
-3. `func azure functionapp publish <app-name>` from `azure_function/`.
+2. Upload the contents of `models/` to the `models` Blob container. The files come
+   from step 2 of the quick start — built, or downloaded from
+   <https://huggingface.co/DaryaEL/ricochet-models>. Use your own storage account
+   name and resource group:
+
+   ```powershell
+   $conn = az storage account show-connection-string --name <storage-account> `
+           --resource-group <resource-group> --query connectionString -o tsv
+
+   az storage container create --name models --connection-string $conn
+   foreach ($p in "*.npy", "*.pkl", "recent_window.json") {
+     az storage blob upload-batch --destination models --source models `
+       --connection-string $conn --pattern $p --overwrite
+   }
+   ```
+3. Point the Function at the container (Terraform does this for you), then publish
+   the code:
+
+   ```powershell
+   az functionapp config appsettings set --name <app-name> --resource-group <resource-group> `
+     --settings AZURE_STORAGE_CONNECTION_STRING="$conn" MODELS_CONTAINER=models
+
+   cd azure_function
+   func azure functionapp publish <app-name>
+   ```
 
 App settings (`AZURE_STORAGE_CONNECTION_STRING`, `MODELS_CONTAINER`) are set by
 Terraform from the storage account's own attributes, so the connection string
