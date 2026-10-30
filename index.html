@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ricochet — article recommendation</title>
+<meta name="description" content="Ricochet: a recommender that serves five articles per reader, deployed as a serverless Azure Function. Approaches tested, results, the retained architecture and the target architecture.">
+<style>
+  :root {
+    --bg: #ffffff;
+    --surface: #f4f6f7;
+    --surface-2: #e9eef2;
+    --text: #1b2430;
+    --muted: #5d6b79;
+    --line: #d5dde4;
+    --primary: #1f3a5f;
+    --accent: #2e86c1;
+    --warm: #c4651b;
+    --good: #1e8449;
+    --bad: #b03a2e;
+    --on-primary: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f151c;
+      --surface: #17202a;
+      --surface-2: #1f2b37;
+      --text: #e6ebf0;
+      --muted: #9aa8b6;
+      --line: #2c3a48;
+      --primary: #7fb4e3;
+      --accent: #5aa9e6;
+      --warm: #f0a35e;
+      --good: #58c283;
+      --bad: #e98474;
+      --on-primary: #0f151c;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f151c;
+    --surface: #17202a;
+    --surface-2: #1f2b37;
+    --text: #e6ebf0;
+    --muted: #9aa8b6;
+    --line: #2c3a48;
+    --primary: #7fb4e3;
+    --accent: #5aa9e6;
+    --warm: #f0a35e;
+    --good: #58c283;
+    --bad: #e98474;
+    --on-primary: #0f151c;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 4.5rem; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  a { color: var(--accent); }
+  .wrap { max-width: 62rem; margin: 0 auto; padding: 0 16px; }
+
+  /* navigation */
+  header.nav {
+    position: sticky; top: 0; z-index: 10;
+    background: var(--bg); border-bottom: 1px solid var(--line);
+  }
+  header.nav .wrap {
+    display: flex; align-items: center; gap: 1rem; min-height: 3.25rem;
+  }
+  header.nav strong { color: var(--primary); letter-spacing: .02em; }
+  header.nav nav { display: flex; gap: .25rem 1rem; overflow-x: auto; flex: 1; }
+  header.nav nav a { color: var(--muted); text-decoration: none; font-size: .9rem; white-space: nowrap; padding: .25rem 0; }
+  header.nav nav a:hover { color: var(--text); }
+  #theme {
+    background: none; border: 1px solid var(--line); color: var(--muted);
+    border-radius: 6px; padding: .2rem .55rem; font: inherit; font-size: .85rem; cursor: pointer;
+  }
+
+  /* hero */
+  .hero { background: var(--primary); color: var(--on-primary); padding: 3.5rem 0 3rem; }
+  .hero h1 { margin: 0 0 .25rem; font-size: clamp(2.2rem, 7vw, 3.6rem); line-height: 1.1; }
+  .hero p.sub { margin: 0 0 1.5rem; font-size: 1.15rem; opacity: .9; }
+  .hero p.by { margin: 0; opacity: .85; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 1rem; margin-top: 2rem; }
+  .stat { border-top: 2px solid var(--warm); padding-top: .5rem; }
+  .stat b { display: block; font-size: 1.6rem; line-height: 1.2; }
+  .stat span { font-size: .9rem; opacity: .85; }
+
+  /* sections */
+  section { padding: 2.75rem 0 1rem; }
+  section + section { border-top: 1px solid var(--line); }
+  h2 { margin: 0 0 .25rem; color: var(--primary); font-size: 1.6rem; line-height: 1.25; }
+  h2 + .lead { color: var(--muted); margin: 0 0 1.25rem; }
+  h3 { margin: 1.5rem 0 .5rem; font-size: 1.1rem; }
+  p { margin: .6rem 0; }
+  ul { padding-left: 1.2rem; margin: .5rem 0; }
+  li { margin: .3rem 0; }
+  code { background: var(--surface-2); border-radius: 4px; padding: .05em .35em; font-size: .9em; }
+
+  .callout {
+    background: var(--surface); border-left: 4px solid var(--warm);
+    padding: .75rem 1rem; border-radius: 0 6px 6px 0; margin: 1.25rem 0;
+  }
+  .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.1rem; }
+  .card h3 { margin-top: 0; }
+  .card .tag { font-size: .8rem; color: var(--muted); }
+  .pros, .cons { margin: .5rem 0 0; padding-left: 0; list-style: none; font-size: .93rem; }
+  .pros li::before { content: "＋ "; color: var(--good); font-weight: 700; }
+  .cons li::before { content: "－ "; color: var(--bad); font-weight: 700; }
+  .chosen { border-color: var(--warm); box-shadow: 0 0 0 1px var(--warm); }
+
+  /* tables */
+  .table-wrap { overflow-x: auto; margin: 1rem 0; }
+  table { border-collapse: collapse; width: 100%; font-size: .93rem; }
+  th, td { text-align: left; padding: .5rem .7rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: .85rem; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tr.hl td { background: var(--surface); font-weight: 600; }
+
+  /* bar chart */
+  .bars { margin: 1rem 0; }
+  .bar { display: grid; grid-template-columns: 7.5rem 1fr 4.5rem; align-items: center; gap: .6rem; margin: .45rem 0; font-size: .93rem; }
+  .bar .track { background: var(--surface-2); border-radius: 4px; height: 1.5rem; }
+  .bar .fill { background: var(--accent); height: 100%; border-radius: 4px; }
+  .bar.top .fill { background: var(--warm); }
+  .bar small { color: var(--muted); }
+  .bar b { text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* flow diagrams (html, so they reflow on small screens) */
+  .flow { display: grid; gap: .75rem; align-items: stretch; margin: 1.25rem 0; }
+  .flow.three { grid-template-columns: 1fr auto 1fr auto 1fr; }
+  .node {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+    padding: .7rem .9rem; font-size: .92rem;
+  }
+  .node b { display: block; color: var(--primary); margin-bottom: .15rem; }
+  .node.core { border-color: var(--accent); background: var(--surface-2); }
+  .node.store { border-style: dashed; }
+  .arrow { align-self: center; text-align: center; color: var(--muted); font-size: .8rem; }
+  .arrow i { display: block; font-style: normal; font-size: 1.4rem; color: var(--accent); line-height: 1; }
+  .stack { display: grid; gap: .6rem; }
+  @media (max-width: 720px) {
+    .flow.three { grid-template-columns: 1fr; }
+    .arrow i { transform: rotate(90deg); }
+    .bar { grid-template-columns: 5.5rem 1fr 3.8rem; }
+  }
+  .lane { display: grid; grid-template-columns: 9rem 1fr; gap: .75rem; align-items: center; margin: .6rem 0; }
+  .lane > .label { font-size: .85rem; color: var(--muted); }
+  .lane .chain { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+  .lane .chain .node { padding: .45rem .7rem; }
+  .lane .chain .sep { color: var(--accent); font-weight: 700; }
+  @media (max-width: 720px) { .lane { grid-template-columns: 1fr; gap: .25rem; } }
+
+  svg.scatter { width: 100%; height: auto; max-width: 40rem; display: block; margin: 1rem auto; }
+  svg.scatter text { fill: var(--muted); font-size: 12px; font-family: inherit; }
+  svg.scatter .lbl { fill: var(--text); font-size: 13px; font-weight: 600; }
+  svg.scatter line.grid { stroke: var(--line); stroke-width: 1; }
+  svg.scatter .axis { stroke: var(--muted); stroke-width: 1; }
+
+  footer { margin-top: 3rem; padding: 2rem 0 3rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .92rem; }
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <strong>Ricochet</strong>
+    <nav aria-label="Sections">
+      <a href="#context">Context</a>
+      <a href="#approaches">Approaches</a>
+      <a href="#results">Results</a>
+      <a href="#retained">Retained system</a>
+      <a href="#application">Application</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#target">Target architecture</a>
+      <a href="#industrialisation">Industrialisation</a>
+    </nav>
+    <button id="theme" type="button" aria-label="Switch theme">Theme</button>
+  </div>
+</header>
+
+<div class="hero">
+  <div class="wrap">
+    <h1>Ricochet</h1>
+    <p class="sub">Article recommendation system — the MVP of the My Content start-up</p>
+    <p class="by">Darya Filatova</p>
+    <div class="stats">
+      <div class="stat"><b>5</b><span>articles recommended per reader</span></div>
+      <div class="stat"><b>2,988,181</b><span>clicks (public Globo.com dataset)</span></div>
+      <div class="stat"><b>364,047</b><span>articles in the catalogue</span></div>
+      <div class="stat"><b>×&nbsp;42</b><span>precision gain from freshness</span></div>
+    </div>
+  </div>
+</div>
+
+<main class="wrap">
+
+<section id="context">
+  <h2>Context and functional description</h2>
+  <p class="lead">What was asked, and with which data.</p>
+  <p>My Content wants to encourage reading by recommending relevant content. The most critical feature of the MVP fits in one sentence: <em>“as a user of the application, I receive a selection of five articles.”</em> As there is no proprietary data yet, the MVP is built on the public <em>News Portal User Interactions by Globo.com</em> dataset.</p>
+  <div class="callout"><strong>Major constraint: the dataset is anonymised.</strong> An article has no title and no text, only an identifier and a 250-dimension vector. There are no ratings or reviews, only clicks, so the signal is implicit. Everything is done without reading the content, and the interface can only display identifiers, a category, a length and a date.</div>
+
+  <h3>What the service does</h3>
+  <p>For a given reader (<code>user_id</code>), it returns the <code>n</code> articles most likely to interest them (5 by default). It accepts a strategy (<code>method</code>), a region, a reading history supplied by the caller and a freshness filter.</p>
+  <ul>
+    <li><strong>Five strategies to choose from</strong>: popularity, content, collaborative ALS, SVD, hybrid — plus the mixed strategy, served by default.</li>
+    <li><strong>New reader, or one with no usable history</strong>: popular articles, adapted to their region when it is known.</li>
+    <li><strong>Priority to recent content</strong>: the recommendation window is recomputed periodically.</li>
+    <li><strong>Never an empty list</strong>, whatever the request.</li>
+    <li><strong>Stateless</strong>: for a reader the service does not know, the caller sends the history in the request.</li>
+  </ul>
+</section>
+
+<section id="approaches">
+  <h2>The five approaches tested</h2>
+  <p class="lead">How each one ranks the articles, with its advantages and drawbacks.</p>
+  <div class="grid">
+    <article class="card">
+      <h3>Popularity</h3>
+      <div class="tag">most-read articles over a time window</div>
+      <p>The baseline to beat: it personalises nothing, so any more complex approach has to do better.</p>
+      <ul class="pros"><li>highest precision (HitRate@5 = 0.2525 over 1 hour)</li><li>no cold start</li></ul>
+      <ul class="cons"><li>same list for every reader (personalisation 4%)</li><li>exposes 11 articles out of 364,047</li></ul>
+    </article>
+    <article class="card">
+      <h3>Content-based filtering</h3>
+      <div class="tag">profile = mean of the embeddings read, cosine against the catalogue</div>
+      <ul class="pros"><li>works from the first click, with no retraining</li><li>a new article can be recommended immediately</li><li>widest coverage: 0.27% of the catalogue</li><li>personalisation 96%</li></ul>
+      <ul class="cons"><li>low precision: HitRate@5 = 0.0200</li><li>with no date restriction, suggests articles that are years old</li></ul>
+    </article>
+    <article class="card">
+      <h3>Collaborative ALS</h3>
+      <div class="tag">factorisation for implicit feedback (<code>implicit</code> library)</div>
+      <ul class="pros"><li>captures latent tastes that content similarity cannot see</li><li>element of surprise, outside the theme already read</li><li>personalisation 95%</li></ul>
+      <ul class="cons"><li>HitRate@5 = 0.0415 on the test period</li><li>useless for a new reader or a new article</li><li>an article published two hours ago has almost no co-reads</li><li>sensitive, coupled settings</li></ul>
+    </article>
+    <article class="card">
+      <h3>Collaborative SVD</h3>
+      <div class="tag">prediction of ratings derived from clicks (<code>Surprise</code> library)</div>
+      <p>Same algorithm, three definitions of the rating: article stars (0.0015, does not rank), binary + 1 negative (0.0080), binary + 4 negatives (0.0815 on validation).</p>
+      <ul class="pros"><li>well posed, the best of the three variants</li><li>fast to train, few settings</li></ul>
+      <ul class="cons"><li>does not reproduce: 0.0815 on validation, 0.0220 on test</li><li>same cold start as ALS</li></ul>
+    </article>
+    <article class="card chosen">
+      <h3>Mixed — retained for production</h3>
+      <div class="tag">4 slots to recent popularity, 1 slot to content</div>
+      <ul class="pros"><li>the slot given to content costs no measurable precision</li><li>it multiplies catalogue coverage by 38</li><li>best precision/coverage compromise of the five approaches</li></ul>
+      <ul class="cons"><li>limited personalisation: only 22%</li></ul>
+    </article>
+  </div>
+</section>
+
+<section id="results">
+  <h2>Results</h2>
+  <p class="lead">An evaluation protocol that does not let itself be flattered, and a result that changes the product's priority.</p>
+
+  <h3>How we found out the first figures were wrong</h3>
+  <p>First evaluation: ALS trained on 100% of the clicks, then measured by removing each reader's last click — a click the model had already seen. HitRate@5 = <strong>0.2415</strong>. With a correct temporal split it falls to <strong>0.0415</strong>: a factor of 5.8 of imaginary precision. The split is temporal, 60 / 20 / 20: settings are tuned on validation, and the test period is used only for the final measurement, once.</p>
+
+  <h3>Freshness matters more than the model</h3>
+  <p>Same algorithm, only the counting window of the popularity ranking changes. HitRate@5 measured on the test period:</p>
+  <div class="bars" role="img" aria-label="HitRate@5 by counting window: 1 hour 0.2525; 6 hours 0.1590; 24 hours 0.0465; whole history 0.0060">
+    <div class="bar top"><span>1 hour<br><small>684 candidates</small></span><div class="track"><div class="fill" style="width:100%"></div></div><b>0.2525</b></div>
+    <div class="bar"><span>6 hours<br><small>2,101 candidates</small></span><div class="track"><div class="fill" style="width:63%"></div></div><b>0.1590</b></div>
+    <div class="bar"><span>24 hours<br><small>4,454 candidates</small></span><div class="track"><div class="fill" style="width:18.4%"></div></div><b>0.0465</b></div>
+    <div class="bar"><span>whole history<br><small>32,582 candidates</small></span><div class="track"><div class="fill" style="width:2.4%"></div></div><b>0.0060</b></div>
+  </div>
+  <p><strong>A factor of 42</strong> between the first and the last bar, without changing a line of algorithm. The explanation: 48% of the articles read during the evaluated period did not exist yet during training. Product consequence: recomputing the window continuously matters more than refining the model.</p>
+
+  <h3>Four criteria, not one</h3>
+  <p>Precision alone always picks popularity, which is twelve times more precise than content but exposes only 11 articles out of 364,047: a publisher loses its catalogue. Hence four criteria: precision (HitRate@5), catalogue coverage, personalisation (the difference between two readers' lists) and recall (Recall@5).</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Configuration (test period)</th><th class="num">HitRate@5</th><th class="num">Coverage</th><th class="num">Personalisation</th></tr></thead>
+      <tbody>
+        <tr><td>Popularity, 1 h window</td><td class="num">0.2525</td><td class="num">0.003%</td><td class="num">4%</td></tr>
+        <tr class="hl"><td>Mixed — 4 popular + 1 content</td><td class="num">0.2500</td><td class="num">0.116%</td><td class="num">22%</td></tr>
+        <tr><td>ALS (24 h, 16 factors)</td><td class="num">0.0415</td><td class="num">0.015%</td><td class="num">95%</td></tr>
+        <tr><td>SVD (binary + 4 negatives)</td><td class="num">0.0220</td><td class="num">0.010%</td><td class="num">56%</td></tr>
+        <tr><td>Content (6 h pool)</td><td class="num">0.0200</td><td class="num">0.268%</td><td class="num">96%</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <svg class="scatter" viewBox="0 0 640 340" role="img" aria-labelledby="sc-t sc-d">
+    <title id="sc-t">Catalogue coverage against precision</title>
+    <desc id="sc-d">Scatter plot with a logarithmic vertical axis. The mixed strategy is at the top right: precise and varied. Popularity is precise but not varied; the collaborative approaches are at the bottom left.</desc>
+    <g>
+      <line class="grid" x1="70" y1="55" x2="600" y2="55"/><line class="grid" x1="70" y1="108.7" x2="600" y2="108.7"/>
+      <line class="grid" x1="70" y1="167.6" x2="600" y2="167.6"/><line class="grid" x1="70" y1="221.3" x2="600" y2="221.3"/>
+      <line class="grid" x1="70" y1="280.2" x2="600" y2="280.2"/>
+      <line class="axis" x1="70" y1="30" x2="70" y2="300"/><line class="axis" x1="70" y1="300" x2="600" y2="300"/>
+    </g>
+    <g text-anchor="end">
+      <text x="62" y="59">0.3</text><text x="62" y="112.7">0.1</text><text x="62" y="171.6">0.03</text>
+      <text x="62" y="225.3">0.01</text><text x="62" y="284.2">0.003</text>
+    </g>
+    <g text-anchor="middle">
+      <text x="70" y="318">0</text><text x="168" y="318">0.05</text><text x="266" y="318">0.1</text>
+      <text x="364" y="318">0.15</text><text x="463" y="318">0.2</text><text x="561" y="318">0.25</text>
+    </g>
+    <text x="335" y="336" text-anchor="middle">HitRate@5 (precision)</text>
+    <text x="14" y="170" transform="rotate(-90 14 170)" text-anchor="middle">Catalogue coverage, % (log scale)</text>
+    <g>
+      <circle cx="561" cy="280" r="7" fill="var(--accent)"/><text class="lbl" x="552" y="266" text-anchor="end">Popularity 1&nbsp;h</text>
+      <circle cx="561" cy="101" r="9" fill="var(--warm)"/><text class="lbl" x="550" y="90" text-anchor="end">Mixed (retained)</text>
+      <circle cx="152" cy="201" r="7" fill="var(--accent)"/><text class="lbl" x="164" y="205">ALS</text>
+      <circle cx="113" cy="221" r="7" fill="var(--accent)"/><text class="lbl" x="125" y="239">SVD</text>
+      <circle cx="109" cy="61" r="7" fill="var(--accent)"/><text class="lbl" x="122" y="65">Content</text>
+    </g>
+  </svg>
+  <p>The mixed strategy alone approaches the top-right corner: as precise as popularity, but with 38 times more of the catalogue exposed. The two collaborative approaches stay at the bottom left: an order of magnitude less precise than popularity. They are available in the application but not served.</p>
+  <p><small>Limits, stated openly: cold start is not measured (only readers known at training time are evaluated), and all these figures are offline — the click-through rate on real recommendations remains the only true judge.</small></p>
+</section>
+
+<section id="retained">
+  <h2>The retained recommendation system</h2>
+  <p class="lead">What runs in production: the “mixed” strategy.</p>
+  <div class="grid">
+    <div class="card">
+      <h3>Five slots</h3>
+      <ul>
+        <li><strong>Slots 1 to 4</strong>: the most-read articles of the last hour.</li>
+        <li><strong>Slot 5</strong>: one article chosen by content, from a 6-hour pool.</li>
+        <li>Articles already read are always excluded.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Never an empty list</h3>
+      <p>For a reader with no usable history, a four-level fallback cascade: region crossed with freshness, then freshness alone, then region alone, then the whole history.</p>
+      <p>A <code>history</code> passed in the request personalises even a reader the service has never seen.</p>
+    </div>
+    <div class="card">
+      <h3>Why this split</h3>
+      <p>It costs about 1% of precision and multiplies the share of the catalogue exposed by 38: the best measured compromise between accuracy and coverage.</p>
+    </div>
+  </div>
+</section>
+
+<section id="application">
+  <h2>The application</h2>
+  <p class="lead">A Streamlit interface that calls the Azure Function and displays the five articles.</p>
+  <ul>
+    <li><strong>Pick a reader</strong> from the list and get their five articles, with stars and reader counts.</li>
+    <li><strong>Untick “recent articles”</strong>: the list changes — the measured freshness effect, live.</li>
+    <li><strong>Switch strategy</strong> (content, ALS, SVD, hybrid): a different ranking.</li>
+    <li><strong>Mark an article as read</strong>: the content profile is recomputed on demand, with no retraining.</li>
+    <li><strong>Browse the catalogue</strong> of 364,047 articles: without it, the reader would only click what the model already suggests.</li>
+    <li><strong>Register a new reader</strong>: recommended immediately, region optional.</li>
+    <li><strong>Publish a new article</strong>: available within minutes. The PCA projection is saved with the catalogue (51&nbsp;KB), so an article is added without refitting the PCA or recomputing the 364,047 existing vectors.</li>
+  </ul>
+  <p><small>The application computes nothing: it calls the endpoint and displays the five identifiers — it is the Function that recommends.</small></p>
+</section>
+
+<section id="architecture">
+  <h2>Retained architecture: architecture 2</h2>
+  <p class="lead">Serverless <em>without</em> a dedicated API: the Function reads Blob Storage itself.</p>
+
+  <div class="flow three" role="group" aria-label="Diagram of the retained architecture">
+    <div class="node"><b>Local application</b>Streamlit demonstration interface</div>
+    <div class="arrow"><i>⇄</i>user_id<br>5 article_id</div>
+    <div class="node core"><b>Azure Function</b><code>/api/recommend</code><br>Recommender, <code>numpy</code> only</div>
+    <div class="arrow"><i>⇄</i>reads</div>
+    <div class="stack">
+      <div class="node store"><b>Blob Storage — freshness</b>23&nbsp;KB · <em>blob input binding</em><br>re-read on every call, about 2&nbsp;ms</div>
+      <div class="node store"><b>Blob Storage — heavy artifacts</b>253&nbsp;MB · SDK + cache<br>read at cold start, about 8&nbsp;s</div>
+    </div>
+  </div>
+
+  <ul>
+    <li><strong>Stateless.</strong> The Function keeps nothing between two requests: the profile of a reader it does not know arrives in the <code>history</code> parameter.</li>
+    <li><strong>But not memoryless.</strong> The Recommender instance is reused from one invocation to the next: the 253&nbsp;MB are read once per instance, at cold start.</li>
+    <li><strong>Two accesses, not one.</strong> The binding re-reads its blob on every invocation, which is what 23&nbsp;KB that change every hour needs. Applied to the 253&nbsp;MB it would remove the cache: 8&nbsp;s per call instead of 0.2&nbsp;s, 40 times more.</li>
+    <li><strong>Embeddings reduced by PCA</strong>: 250 dimensions brought down to 50, to fit within the limits of Azure's free tier.</li>
+    <li><strong>numpy only at inference.</strong> scikit-learn, <code>implicit</code> and Surprise are used offline only, to produce the artifacts.</li>
+  </ul>
+
+  <div class="callout"><strong>What separates a service from a demonstration.</strong> Four silent failures are each covered by a guard and a test: artifact drift (cache validity judged on the blob's size and date), a stale cache (the container is enumerated, not read from a fixed list), an inconsistent catalogue (any identifier outside the catalogue is filtered out) and interference between concurrent requests (the supplied history lives in a <code>threading.local</code>). None of them raises an error: the service would answer 200 with bad recommendations.</div>
+</section>
+
+<section id="target">
+  <h2>Target architecture</h2>
+  <p class="lead">Absorbing new articles and new readers.</p>
+  <p>The MVP recomputes everything offline, in batch. At scale, novelty has to be absorbed continuously: a news portal publishes all the time, and most of its audience is barely known or not known at all.</p>
+
+  <div role="group" aria-label="Diagram of the target architecture">
+    <div class="lane"><div class="label">New readers</div>
+      <div class="chain"><div class="node">Reader clicks</div><span class="sep">→</span><div class="node">Event Hub</div><span class="sep">→</span><div class="node">Ingestion function</div><span class="sep">→</span><div class="node store"><b>Profile store</b></div></div></div>
+    <div class="lane"><div class="label">New articles</div>
+      <div class="chain"><div class="node">New article</div><span class="sep">→</span><div class="node">Embedding → persisted PCA projection</div><span class="sep">→</span><div class="node store"><b>Catalogue</b> (Blob)</div></div></div>
+    <div class="lane"><div class="label">Collaborative</div>
+      <div class="chain"><div class="node">Scheduler</div><span class="sep">→</span><div class="node">Batch ALS retraining</div><span class="sep">→</span><div class="node store"><b>Versioned factors</b></div></div></div>
+    <div class="lane"><div class="label">Serving</div>
+      <div class="chain"><div class="node core"><b>Dedicated recommendation API</b>(architecture 1) — scaling, caching, versioning, A/B</div><span class="sep">→</span><div class="node">Client applications</div></div></div>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Novelty</th><th>Handling</th><th>Latency</th><th>Retraining</th></tr></thead>
+      <tbody>
+        <tr><td>New article</td><td>embedding + saved PCA projection</td><td>minutes</td><td>no</td></tr>
+        <tr><td>New click</td><td>profile recomputed on demand</td><td>real time</td><td>no</td></tr>
+        <tr><td>New reader</td><td>popularity, then content from the first click</td><td>real time</td><td>no</td></tr>
+        <tr><td>Collaborative coverage</td><td>latent factors</td><td>hours</td><td>yes</td></tr>
+        <tr><td>Catalogue drift</td><td>PCA refit</td><td>scheduled</td><td>yes</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p><strong>Only the collaborative part requires retraining.</strong> The two immediate needs — an article visible at once, a reader served from their first click — go through the first two lanes, with no relearning. Still to build: event ingestion, the profile store, a sliding window recomputed continuously, and a similarity index for scale.</p>
+</section>
+
+<section id="industrialisation">
+  <h2>Industrialisation</h2>
+  <p class="lead">What makes the MVP reproducible and verifiable.</p>
+  <ul>
+    <li><strong>Tests</strong>: 87 unit tests on synthetic artifacts, with no real data.</li>
+    <li><strong>Continuous integration</strong> (GitHub Actions): tests, repository hygiene (no secrets, no artifact versioned by mistake) and Terraform validation, on every push and every pull request.</li>
+    <li><strong>Deployed-service check</strong>: a script compares Azure's response to a reference record, because a service that answers is not a service that answers correctly.</li>
+    <li><strong>Infrastructure described in Terraform</strong>: resource group, storage account and a Function on a Flex Consumption plan, with the connection string read from the resource rather than written in clear text.</li>
+    <li><strong>A single recommendation core</strong> (<code>src/recommender.py</code>): the deployed copies are generated, and CI checks they are up to date.</li>
+    <li><strong>Quality gate</strong>: publishing a retrained model is blocked if HitRate@5 drops by more than 10% against the versioned reference.</li>
+  </ul>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p><strong>Code and documentation</strong>:
+      <a data-p="" href="https://github.com/delnouty/Ricochet-content-recommendation">GitHub repository</a> ·
+      <a data-p="/blob/main/readme.md" href="https://github.com/delnouty/Ricochet-content-recommendation/blob/main/readme.md">readme</a> ·
+      <a data-p="/blob/main/docs/architecture.md" href="https://github.com/delnouty/Ricochet-content-recommendation/blob/main/docs/architecture.md">architecture</a> ·
+      <a data-p="/blob/main/docs/azure_deployment.md" href="https://github.com/delnouty/Ricochet-content-recommendation/blob/main/docs/azure_deployment.md">deploying on Azure</a></p>
+    <p>Ricochet — the My Content MVP. Darya Filatova.</p>
+  </div>
+</footer>
+
+<script>
+  // Repository address: the one place to change if the repository is renamed.
+  var REPO = "https://github.com/delnouty/Ricochet-content-recommendation";
+  document.querySelectorAll("a[data-p]").forEach(function (a) { a.href = REPO + a.dataset.p; });
+
+  // Theme: light, dark, or the system setting (default).
+  var root = document.documentElement, btn = document.getElementById("theme");
+  function stored() { try { return localStorage.getItem("theme"); } catch (e) { return null; } }
+  function store(v) { try { localStorage.setItem("theme", v); } catch (e) {} }
+  if (stored()) root.setAttribute("data-theme", stored());
+  btn.addEventListener("click", function () {
+    var dark = root.getAttribute("data-theme") === "dark" ||
+      (!root.getAttribute("data-theme") && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    var next = dark ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    store(next);
+  });
+</script>
+</body>
+</html>
