@@ -1,13 +1,13 @@
 % Support de soutenance Ricochet — Beamer.
 %
 % Structure imposée par le brief, et budget de temps respecté par le nombre de
-% diapositives (24 au total, ouverture et clôture comprises) :
+% diapositives (22 au total, ouverture et clôture comprises) :
 %
 %   | Partie                                | Temps  | Diapositives |
 %   | Contexte et description fonctionnelle |  2 min |      2       |
 %   | Approches de modélisation testées     | 10 min |      9       |
-%   | Fonctionnalités du système dans l'app |  6 min |      5       |
-%   | Architecture retenue, cible           |  4 min |      5       |
+%   | Fonctionnalités du système dans l'app |  6 min |      4       |
+%   | Architecture retenue, cible           |  4 min |      4       |
 %   | Démonstration de l'application        |  2 min |      1       |
 %
 % Les cinq éléments exigés par le brief et où ils se trouvent :
@@ -89,7 +89,8 @@
   \vfill
   {\color{white}\Huge\bfseries Ricochet}\\[0.6em]
   {\color{white!75!primary}\Large Système de recommandation d'articles — MVP}\\[1.5em]
-  \textcolor{accent2}{\rule{0.25\textwidth}{2pt}}
+  \textcolor{accent2}{\rule{0.25\textwidth}{2pt}}\\[1.2em]
+  {\color{white}\large Darya Filatova}
   \vfill
   {\color{white!70!primary}\small Approches testées \textperiodcentered\ Fonctionnalités
    \textperiodcentered\ Architecture cible \textperiodcentered\ Démonstration}
@@ -557,34 +558,6 @@
   \end{itemize}
 \end{frame}
 
-\begin{frame}{Reproductibilité et garde-fous}
-  \framesubtitle{Ce qui empêche une régression de partir en production}
-  \centering
-  \scriptsize
-  \begin{tabular}{@{}ll@{}}
-    \toprule
-    \textbf{Élément} & \textbf{Rôle} \\
-    \midrule
-    Découpage temporel 60/20/20 & réglage sur validation, mesure sur test \\
-    MLflow (SQLite)             & paramètres, métriques et commit git de chaque essai \\
-    Registre de modèles         & versions des artefacts, retour arrière possible \\
-    \textbf{Porte de qualité}   & bloque la publication si HitRate@5 baisse de $>$10 \% \\
-    CI (GitHub Actions)         & 87 tests, copies déployées, secrets, Terraform \\
-    \bottomrule
-  \end{tabular}
-
-  \vspace{0.8em}
-  \raggedright\small
-  \begin{itemize}\itemsep3pt
-    \item La porte compare aux métriques de référence \textbf{versionnées dans le
-          dépôt} ; la référence ne change que délibérément.
-    \item Sans elle, un ré-entraînement dégradé se publierait sans alerte — c'est
-          exactement ce qui est arrivé avec un chargeur d'artefacts incomplet, qui
-          servait la popularité de tout l'historique \pointfort{sans lever
-          d'erreur}.
-  \end{itemize}
-\end{frame}
-
 % ═══════════════ PARTIE 3 — Architecture retenue et cible (4 min, 5 diapos) ══════════
 \begin{frame}{Partie 3 — Architecture retenue : l'architecture 2}
   \framesubtitle{Serverless \emph{sans} API dédiée — la Function lit Blob Storage elle-même}
@@ -744,34 +717,6 @@
   \pointfort{Seule la ligne du bas impose un ré-entraînement.} Les deux besoins
   immédiats — un article visible tout de suite, un lecteur servi dès son premier
   clic — passent par les deux premières lignes, sans ré-apprentissage.
-\end{frame}
-
-\begin{frame}{Architecture cible — ce que coûte chaque nouveauté}
-  \framesubtitle{Latence atteignable et besoin de ré-entraînement}
-  \centering
-  \scriptsize
-  \begin{tabular}{@{}lllc@{}}
-    \toprule
-    \textbf{Événement} & \textbf{Traitement} & \textbf{Latence} &
-    \textbf{Ré-entr.} \\
-    \midrule
-    Nouvel article      & embedding + projection ACP        & minutes    & non \\
-    Nouveau clic        & profil recalculé à la demande     & temps réel & non \\
-    Nouveau lecteur     & popularité, puis contenu au 1\textsuperscript{er} clic
-                        & temps réel & non \\
-    Couverture collab.  & facteurs latents                  & heures     & oui \\
-    Dérive du catalogue & ré-ajustement de l'ACP            & planifié   & oui \\
-    \bottomrule
-  \end{tabular}
-
-  \vspace{0.8em}
-  \raggedright\small
-  \begin{itemize}\itemsep3pt
-    \item \pointfort{Seule la partie collaborative impose un ré-entraînement} ; les
-          deux besoins immédiats sont couverts sans.
-    \item Reste à construire : ingestion événementielle, store de profils, fenêtre
-          glissante recalculée en continu, index de similarité pour l'échelle.
-  \end{itemize}
 \end{frame}
 
 % ═════════════════════ PARTIE 4 — Démonstration (2 min, 1 diapo) ══════════
