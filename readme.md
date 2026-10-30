@@ -10,7 +10,7 @@ Hugging Face Space and to a network-free local app. Temporal-split evaluation,
 MVP for the **My Content** start-up: recommend **5 articles** per user, built on the
 public *News Portal User Interactions by Globo.com* dataset (no proprietary data yet).
 
-Repository (branch `dev`, the one submitted): <https://github.com/delnouty/Ricochet-content-recommendation/tree/dev>
+Repository (branch `main`): <https://github.com/delnouty/Ricochet-content-recommendation/tree/main>
 
 ## How it works
 
