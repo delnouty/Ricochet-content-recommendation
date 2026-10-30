@@ -1,751 +1,618 @@
-% Support de soutenance Ricochet — Beamer.
+% Support de soutenance Ricochet — Beamer, 22 diapositives, un message par diapositive.
 %
-% Structure imposée par le brief, et budget de temps respecté par le nombre de
-% diapositives (22 au total, ouverture et clôture comprises) :
+% Identité visuelle : celle de la page index.html. Fond clair froid, encre bleu nuit, cobalt pour
+% l'information, corail pour le point qui compte. Cinq billes qui ricochent ouvrent et ferment :
+% quatre bleues (les places données à la popularité récente), une corail (la place du contenu).
 %
-%   | Partie                                | Temps  | Diapositives |
-%   | Contexte et description fonctionnelle |  2 min |      2       |
-%   | Approches de modélisation testées     | 10 min |      9       |
-%   | Fonctionnalités du système dans l'app |  6 min |      4       |
-%   | Architecture retenue, cible           |  4 min |      4       |
-%   | Démonstration de l'application        |  2 min |      1       |
+% Règles de lisibilité : corps de texte 12 pt, jamais plus de deux idées par bloc, chaque titre
+% énonce la conclusion de la diapositive, les chiffres clés sont écrits en grand.
+%
+% Budget de temps :  contexte 2 min (2) · approches 10 min (7) · fonctionnalités 6 min (3)
+%                    · architecture 4 min (5) · démonstration 2 min (1) · ouverture et clôture (2)
 %
 % Les cinq éléments exigés par le brief et où ils se trouvent :
-%   1. description fonctionnelle .... « L'application en quatre gestes »
-%   2. modèles + avantages/inconv. .. les 3 diapos de modèle, colonnes
-%                                      vert/rouge ; popularité et mixte traitées
-%                                      dans les résultats
-%   3. schéma de l'archi retenue .... « Partie 3 — Architecture retenue »
-%                                      (le binding y est DANS le schéma)
-%   4. système de reco utilisé ...... « Le système de recommandation retenu »
-%   5. schéma de l'archi cible ...... « Architecture cible » (le schéma, pas
-%                                      le tableau qui le suit)
+%   1. description fonctionnelle .... diapositive 3
+%   2. modèles + avantages/inconv. .. diapositives 5, 6, 7 (cartes vert / rouge)
+%   3. schéma de l'archi retenue .... diapositive 16
+%   4. système de reco utilisé ...... diapositives 11 et 12
+%   5. schéma de l'archi cible ...... diapositive 20
 %
-% Compilation (deux passes pour la table des matières) :
-%   latexmk -pdf -lualatex docs/presentation.tex
-% ou :
-%   lualatex -output-directory=docs docs/presentation.tex   (deux fois)
-%
-% ⚠️ NE PAS utiliser pdflatex : fontspec exige XeTeX ou LuaTeX, et pdflatex
-% supprime le PDF existant avant d'échouer. XeLaTeX convient aussi — le texte
-% contient des caractères (★, ×, —) et une typographie française qui passent mal
-% en encodage historique.
+% Compilation (deux passes), depuis la racine du dépôt :
+%   lualatex -output-directory=docs docs/presentation.tex
+% Les polices IBM Plex Sans et IBM Plex Mono doivent être installées (MiKTeX les fournit).
+% ⚠️ NE PAS utiliser pdflatex : fontspec exige XeTeX ou LuaTeX.
 
-\documentclass[aspectratio=169, 11pt]{beamer}
+\documentclass[aspectratio=169, 12pt, t]{beamer}
 
 \usepackage{fontspec}
 \usepackage{polyglossia}
 \setdefaultlanguage{french}
 \usepackage{graphicx}
-\graphicspath{{./}}
-\usepackage{booktabs}
-\usepackage{array}
+\graphicspath{{./}{docs/}}
 \usepackage{tikz}
-\usetikzlibrary{arrows.meta, positioning}
+\usetikzlibrary{arrows.meta, positioning, calc}
+\usepackage[skins]{tcolorbox}
 
-% --- Thème sobre : pas de fioritures, le contenu porte le propos -------------
-\usetheme{default}
-\usecolortheme{default}
+\setmainfont{IBMPlexSans}[Extension=.otf, UprightFont=*-Regular, BoldFont=*-SemiBold,
+  ItalicFont=*-Italic, BoldItalicFont=*-SemiBoldItalic]
+\setsansfont{IBMPlexSans}[Extension=.otf, UprightFont=*-Regular, BoldFont=*-SemiBold,
+  ItalicFont=*-Italic, BoldItalicFont=*-SemiBoldItalic]
+\setmonofont{IBMPlexMono}[Extension=.otf, UprightFont=*-Regular, BoldFont=*-Medium,
+  ItalicFont=*-Italic, BoldItalicFont=*-MediumItalic]
+\newfontfamily\fbold[Extension=.otf]{IBMPlexSans-Bold}
+\renewcommand*\familydefault{\sfdefault}
+\usefonttheme{professionalfonts}
+
+\definecolor{ink}{HTML}{0B1020}
+\definecolor{paper}{HTML}{F7F8FA}
+\definecolor{surf}{HTML}{EEF1F6}
+\definecolor{ligne}{HTML}{DCE1EA}
+\definecolor{gris}{HTML}{56607A}
+\definecolor{accent}{HTML}{2447E8}
+\definecolor{signal}{HTML}{E5533D}
+\definecolor{vert}{HTML}{1B7F4B}
+\definecolor{rouge}{HTML}{B42318}
+\definecolor{ricA}{HTML}{7C9BFF}
+\definecolor{ricS}{HTML}{FF7B63}
+\definecolor{surfsombre}{HTML}{A9B4D4}
+
+\input{docs/ricochet_paths.tex}
+
 \setbeamertemplate{navigation symbols}{}
-\setbeamertemplate{itemize items}[circle]
+\setbeamercolor{background canvas}{bg=paper}
+\setbeamercolor{normal text}{fg=ink}
+\setbeamersize{text margin left=1.3cm, text margin right=1.3cm}
+\setbeamertemplate{itemize items}[square]
+\setbeamercolor{itemize item}{fg=accent}
+\setbeamerfont{itemize/enumerate body}{size=\normalsize}
+\setbeamerfont{footline}{size=\tiny, family=\ttfamily}
+\setbeamertemplate{headline}{}
 
-\definecolor{primary}{RGB}{31,58,95}
-\definecolor{accent}{RGB}{46,134,193}
-\definecolor{accent2}{RGB}{230,126,34}
-\definecolor{vert}{RGB}{39,174,96}
-\definecolor{gris}{RGB}{127,140,141}
-\definecolor{clair}{RGB}{244,246,247}
-
-\setbeamercolor{frametitle}{bg=primary, fg=white}
-\setbeamercolor{title}{fg=white}
-\setbeamercolor{structure}{fg=accent}
-\setbeamercolor{alerted text}{fg=accent2}
-\setbeamerfont{frametitle}{size=\large, series=\bfseries}
-\setbeamerfont{framesubtitle}{size=\small}
-\setbeamercolor{framesubtitle}{fg=gris}
+\setbeamertemplate{frametitle}{%
+  \vspace*{0.5em}
+  \begin{beamercolorbox}[wd=\paperwidth, leftskip=1.3cm, rightskip=1.3cm]{frametitle}
+    {\ttfamily\scriptsize\color{accent}\addfontfeature{LetterSpace=6}\MakeUppercase{\insertframesubtitle}}\par\vspace{0.1em}
+    {\fontsize{19}{21}\selectfont\bfseries\color{ink}\insertframetitle}\par
+  \end{beamercolorbox}\vspace{0.2em}}
 
 \setbeamertemplate{footline}{%
-  \hfill\usebeamerfont{footline}\color{gris}\scriptsize
-  \insertframenumber\,/\,\inserttotalframenumber\hspace*{2ex}\vspace*{1ex}}
+  \leavevmode\hbox to\paperwidth{\hspace*{1.3cm}{\usebeamerfont{footline}\color{gris}Ricochet}\hfill
+    {\usebeamerfont{footline}\color{gris}\insertframenumber\,/\,\inserttotalframenumber}\hspace*{1.3cm}}\vspace*{0.6em}}
 
-\newcommand{\pointfort}[1]{\textcolor{accent2}{\textbf{#1}}}
+\newcommand{\pointfort}[1]{\textcolor{signal}{\textbf{#1}}}
+\newcommand{\mono}[1]{{\ttfamily\small #1}}
 
-% Bloc « à retenir » en bas de diapositive
+% Carte : cadre blanc avec un petit libellé mono coloré.
+\newtcolorbox{carte}[2]{enhanced, fontupper=\small, colback=white, colframe=ligne, boxrule=0.5pt, arc=2.2mm,
+  left=3mm, right=3mm, top=2.2mm, bottom=2.2mm, before skip=0pt, after skip=0pt,
+  before upper={{\ttfamily\scriptsize\color{#1}\addfontfeature{LetterSpace=5}\MakeUppercase{#2}}\par\vspace{0.3em}}}
+
+% Une phrase à retenir, en bas de diapositive.
 \newcommand{\aretenir}[1]{%
   \vfill
-  \begin{beamercolorbox}[wd=\textwidth, sep=2ex, rounded=true]{}%
-    \color{primary}\small #1
-  \end{beamercolorbox}}
+  \begin{tcolorbox}[enhanced, colback=surf, colframe=surf, boxrule=0pt, arc=2mm, left=3.5mm, right=3mm,
+      top=1.6mm, bottom=1.6mm, borderline west={2pt}{0pt}{signal}]
+    \small #1
+  \end{tcolorbox}}
 
-\title{\Huge Ricochet}
-\subtitle{Système de recommandation d'articles — MVP}
+% Trois chiffres clés côte à côte : valeur et libellé, trois fois.
+\newcommand{\troischiffres}[6]{%
+  \begin{tikzpicture}
+    \node[anchor=north west, align=left, inner sep=0] at (0,0)   {{\fontsize{24}{26}\selectfont\fbold\color{accent}#1}\\[1pt]{\ttfamily\scriptsize\color{gris}#2}};
+    \node[anchor=north west, align=left, inner sep=0] at (4.6,0) {{\fontsize{24}{26}\selectfont\fbold\color{accent}#3}\\[1pt]{\ttfamily\scriptsize\color{gris}#4}};
+    \node[anchor=north west, align=left, inner sep=0] at (9.0,0) {{\fontsize{24}{26}\selectfont\fbold\color{accent}#5}\\[1pt]{\ttfamily\scriptsize\color{gris}#6}};
+  \end{tikzpicture}}
+
+\tikzset{
+  bloc/.style={draw=ligne, line width=0.6pt, rounded corners=2.5mm, fill=white, align=center,
+               inner sep=2.6mm, font=\normalsize, text=ink, execute at begin node={\hyphenpenalty=10000\exhyphenpenalty=10000}},
+  blocA/.style={bloc, fill=accent, draw=accent, text=white},
+  blocS/.style={bloc, fill=signal, draw=signal, text=white},
+  blocI/.style={bloc, fill=ink, draw=ink, text=white},
+  blocP/.style={bloc, dashed, draw=gris},
+  fl/.style={-{Latex[length=2.6mm]}, line width=1.1pt, color=gris},
+  flA/.style={-{Latex[length=2.6mm]}, line width=1.4pt, color=accent},
+  flS/.style={-{Latex[length=2.6mm]}, line width=1.4pt, color=signal},
+}
+
+\title{Ricochet}
 \date{}
 
 \begin{document}
 
-% ═══════════════════════════════════════════════════════════ Ouverture ══════
-{\setbeamercolor{background canvas}{bg=primary}
+% ═══════════════════════════════════════════════════════════ 1. Ouverture ═══
+{\setbeamercolor{background canvas}{bg=ink}
 \begin{frame}[plain]
+  \begin{tikzpicture}[remember picture, overlay]
+    \begin{scope}[shift={(current page.south west)}]\ricochetA\end{scope}
+  \end{tikzpicture}
   \vfill
-  {\color{white}\Huge\bfseries Ricochet}\\[0.6em]
-  {\color{white!75!primary}\Large Système de recommandation d'articles — MVP}\\[1.5em]
-  \textcolor{accent2}{\rule{0.25\textwidth}{2pt}}\\[1.2em]
+  {\color{ricS}\ttfamily\scriptsize\addfontfeature{LetterSpace=8}MY CONTENT \ \textperiodcentered\ \ MVP}\\[0.7em]
+  {\color{white}\fontsize{58}{60}\selectfont\fbold Ricochet\color{ricS}.}\\[0.5em]
+  {\color{surfsombre}\Large Système de recommandation d'articles}\\[1.6em]
   {\color{white}\large Darya Filatova}
   \vfill
-  {\color{white!70!primary}\small Approches testées \textperiodcentered\ Fonctionnalités
-   \textperiodcentered\ Architecture cible \textperiodcentered\ Démonstration}
 \end{frame}}
 
-\begin{frame}{Contexte}
-  \framesubtitle{Ce qui est demandé, avec quelles données}
-  \begin{itemize}
-    \item Proposer \pointfort{5 articles} à chaque lecteur, pour l'inciter à lire
-          davantage.
-    \item Pas de données propriétaires : jeu public Globo.com —
-          \textbf{2 988 181} clics, \textbf{322 897} lecteurs,
-          \textbf{364 047} articles.
-    \item[] \vspace{0.3em}
-    \item \pointfort{Contrainte majeure : le jeu est anonymisé.}
-      \begin{itemize}
-        \item aucun titre, aucun texte : un article n'est qu'un vecteur de
-              250 dimensions et un identifiant ;
-        \item aucune note, aucun avis : seulement des clics, donc un signal
-              implicite ;
-        \item conséquence — tout se fait sans lire le contenu, et l'interface ne
-              peut afficher que des identifiants.
-      \end{itemize}
-  \end{itemize}
+% ═══════════════════════════════════════════════ 2. Contexte (2 min) ═══════
+\begin{frame}{Une mission : cinq articles par lecteur}
+  \framesubtitle{Contexte}
+  \troischiffres{2\,988\,181}{CLICS}{322\,897}{LECTEURS}{364\,047}{ARTICLES}
+
+  {\ttfamily\scriptsize\color{gris}JEU PUBLIC GLOBO.COM · PAS ENCORE DE DONNÉES PROPRES}
+
+  \vspace{1em}
+  \begin{carte}{signal}{Une contrainte : le jeu est anonymisé}
+    Un article n'a ni titre ni texte : seulement un identifiant et 250 nombres.\\
+    Il n'y a pas de notes : seulement des clics.
+  \end{carte}
+  \aretenir{Tout se fait sans lire un mot : l'interface n'affiche que des identifiants.}
 \end{frame}
 
-\begin{frame}{Description fonctionnelle}
-  \framesubtitle{Ce que le service fait, du point de vue de l'utilisateur}
+\begin{frame}{Un lecteur en entrée, cinq articles en sortie}
+  \framesubtitle{Description fonctionnelle}
+  \label{diapo:service}
+  \begin{tikzpicture}
+    \node[blocI, text width=2.6cm, minimum height=1.5cm] (in) {\ttfamily\normalsize user\_id};
+    \node[blocA, text width=3.7cm, minimum height=1.5cm, right=14mm of in] (sv) {\textbf{Service de\\recommandation}};
+    \node[blocS, text width=3.3cm, minimum height=1.5cm, right=14mm of sv] (out) {\textbf{5 articles}\\{\small identifiants classés}};
+    \draw[fl] (in) -- (sv); \draw[fl] (sv) -- (out);
+  \end{tikzpicture}
+
+  \vspace{1.2em}
   \begin{columns}[T]
-    \begin{column}{0.56\textwidth}
-      \scriptsize
-      \textcolor{accent}{\textbf{Le service}} — pour un lecteur donné, il renvoie
-      les \textbf{N articles} les plus susceptibles de l'intéresser.
-
-      \vspace{4pt}
-      \begin{tabular}{@{}ll@{}}
-        \textbf{Entrées} & \texttt{user\_id} \textcolor{gris}{requis} \\
-                         & \texttt{n} \textcolor{gris}{défaut 5} \textperiodcentered\
-                           \texttt{method} \textcolor{gris}{défaut mixte} \\
-                         & \texttt{region} \textperiodcentered\ \texttt{history}
-                           \textperiodcentered\ \texttt{fresh\_only}
-                           \textcolor{gris}{facultatifs} \\
-        \textbf{Sortie}  & N identifiants d'articles, classés \\
-      \end{tabular}
-
-      \vspace{5pt}
-      \begin{itemize}\itemsep2pt
-        \item \textbf{Cinq stratégies} au choix : popularité, contenu,
-              collaboratif ALS, SVD, hybride — la \pointfort{mixte} par défaut.
-        \item \textbf{Lecteur nouveau ou sans historique exploitable} : articles
-              populaires, \textbf{adaptés à sa région} si elle est connue.
-        \item \textbf{Priorité au contenu récent} : la fenêtre de recommandation
-              est recalculée périodiquement pour tenir compte des articles
-              publiés depuis.
-        \item \pointfort{Jamais de liste vide}, quelle que soit la requête.
-      \end{itemize}
+    \begin{column}{0.31\textwidth}
+      \textbf{Cinq stratégies.}\\ \small La mixte est servie par défaut.
     \end{column}
-    \begin{column}{0.40\textwidth}
-      \scriptsize
-      \textcolor{accent}{\textbf{L'application}} qui l'appelle permet de :
-      \begin{itemize}\itemsep2pt
-        \item choisir un lecteur et obtenir ses articles ;
-        \item \textbf{marquer un article comme lu} — le profil s'enrichit, la
-              liste suivante change, \pointfort{sans ré-entraînement} ;
-        \item parcourir le catalogue (364 047 articles) ;
-        \item \textbf{inscrire} un nouveau lecteur, recommandé immédiatement.
-      \end{itemize}
-
-      \vspace{6pt}
-      \textcolor{gris}{Interface :
-        \hyperref[diapo:interface]{diapositive~\ref*{diapo:interface}}.}
+    \begin{column}{0.31\textwidth}
+      \textbf{Jamais de liste vide.}\\ \small Un lecteur nouveau reçoit les articles populaires de sa région.
+    \end{column}
+    \begin{column}{0.31\textwidth}
+      \textbf{Sans état.}\\ \small Pour un lecteur inconnu, l'appelant transmet son historique.
     \end{column}
   \end{columns}
-  \aretenir{Le service est \pointfort{sans état} : pour un lecteur qu'il ne
-    connaît pas — inscrit une seconde plus tôt — c'est l'appelant qui transmet
-    l'historique dans la requête.}
+  \aretenir{Une application l'appelle : elle choisit un lecteur, marque des lectures, parcourt le catalogue, inscrit des lecteurs.}
 \end{frame}
 
-% ═══════════════════════ PARTIE 1 — Modélisation (10 min, 9 diapos) ════════
-\begin{frame}{Partie 1 — Les cinq approches testées}
-  \framesubtitle{10 minutes \textperiodcentered\ comment chacune classe les articles}
-  \centering
-  \small
-  \begin{tabular}{@{}lll@{}}
-    \toprule
-    \textbf{Approche} & \textbf{Principe} & \textbf{Bibliothèque} \\
-    \midrule
-    Popularité       & articles les plus lus sur une fenêtre     & --- \\
-    Contenu          & profil = moyenne des embeddings, cosinus  & scikit-learn (ACP) \\
-    Collaboratif ALS & factorisation lecteur $\times$ article    & implicit \\
-    Collaboratif SVD & prédiction de notes dérivées des clics    & Surprise \\
-    Mixte            & combinaison sur les 5 places              & --- \\
-    \bottomrule
-  \end{tabular}
-  \vspace{0.7em}
-  \raggedright\scriptsize
-  Les trois approches \textbf{personnalisées} sont détaillées dans les trois
-  diapositives suivantes. La \textbf{popularité} traverse tous les résultats —
-  c'est elle que mesure « la fraîcheur pèse plus que le modèle ». La stratégie
-  \textbf{mixte}, retenue en production, clôt cette partie.
-  \aretenir{La popularité sert de \pointfort{référence à battre} : elle ne
-    personnalise rien, donc toute approche plus complexe doit faire mieux qu'elle.}
-\end{frame}
-
-\begin{frame}{Filtrage par le contenu}
-  \framesubtitle{Similarité des embeddings d'articles}
-  \centering
-  \begin{tikzpicture}[node distance=8mm, every node/.style={font=\scriptsize},
-      bloc/.style={draw=primary, thick, rounded corners, text width=2.6cm,
-                   align=center, minimum height=1cm, text=white}]
-    \node[bloc, fill=accent]  (a) {Articles lus\\par le lecteur};
-    \node[bloc, fill=accent2, right=of a] (b) {Profil = moyenne\\des vecteurs};
-    \node[bloc, fill=primary, right=of b] (c) {Cosinus vers\\le catalogue};
-    \draw[-{Latex[length=2mm]}, gris, thick] (a) -- (b);
-    \draw[-{Latex[length=2mm]}, gris, thick] (b) -- (c);
+% ═══════════════════════ PARTIE 1 — Approches (10 min, 7 diapos) ═══════════
+\begin{frame}{Cinq approches : laquelle servir ?}
+  \framesubtitle{Les approches testées}
+  \begin{tikzpicture}
+    \node[bloc, anchor=north west, text width=2.1cm, minimum height=3.1cm, align=left, inner sep=2.6mm] at (0,0)    {{\fbold Popularité}\\[3pt]{\small les plus lus de la fenêtre}};
+    \node[bloc, anchor=north west, text width=2.1cm, minimum height=3.1cm, align=left, inner sep=2.6mm] at (2.72,0) {{\fbold Contenu}\\[3pt]{\small articles proches de ceux déjà lus}};
+    \node[bloc, anchor=north west, text width=2.1cm, minimum height=3.1cm, align=left, inner sep=2.6mm] at (5.44,0) {{\fbold ALS}\\[3pt]{\small goûts latents appris sur les clics}};
+    \node[bloc, anchor=north west, text width=2.1cm, minimum height=3.1cm, align=left, inner sep=2.6mm] at (8.16,0) {{\fbold SVD}\\[3pt]{\small note prédite à partir des clics}};
+    \node[blocS, anchor=north west, text width=2.1cm, minimum height=3.1cm, align=left, inner sep=2.6mm] at (10.88,0) {{\fbold Mixte}\\[3pt]{\small 4 populaires et 1 contenu}};
   \end{tikzpicture}
-
-  \vspace{1em}
-  \scriptsize
-  \begin{columns}[t]
-    \begin{column}{0.48\textwidth}
-      \textcolor{vert}{\textbf{Avantages}}
-      \begin{itemize}\itemsep2pt
-        \item fonctionne dès le 1\textsuperscript{er} clic, sans ré-entraînement ;
-        \item gère un article nouveau immédiatement (il a un vecteur) ;
-        \item couverture du catalogue la plus large : \textbf{0,27 \%} contre 0,003 \% ;
-        \item personnalisation \textbf{96 \%}.
-      \end{itemize}
-    \end{column}
-    \begin{column}{0.48\textwidth}
-      \textcolor{red!70!black}{\textbf{Inconvénients}}
-      \begin{itemize}\itemsep2pt
-        \item précision faible : HitRate@5 = \textbf{0,0200} ;
-        \item n'exploite pas l'intelligence collective ;
-        \item sans restriction aux articles récents, propose des articles vieux de
-              plusieurs années que personne ne lit.
-      \end{itemize}
-    \end{column}
-  \end{columns}
+  \aretenir{La popularité ne personnalise rien : c'est la \pointfort{référence à battre}.}
 \end{frame}
 
-\begin{frame}{Collaboratif ALS (\texttt{implicit})}
-  \framesubtitle{Factorisation pour feedback implicite}
-  \scriptsize
-  Toutes les cases vides sont traitées comme des \textbf{négatifs pondérés} :
-  une formulation adaptée à des clics, pas à des notes.
+\begin{frame}{Le contenu couvre tout, mais vise mal}
+  \framesubtitle{Filtrage par le contenu}
+  {\small Profil = moyenne des vecteurs lus, puis classement par similarité.}
 
-  \vspace{0.8em}
-  \begin{columns}[t]
+  \vspace{0.3em}
+  \begin{columns}[T]
     \begin{column}{0.48\textwidth}
-      \textcolor{vert}{\textbf{Avantages}}
-      \begin{itemize}\itemsep2pt
-        \item capte des goûts \textbf{latents} qu'aucune similarité de contenu ne
-              voit ;
-        \item effet de surprise : recommande hors du thème déjà lu ;
-        \item personnalisation \textbf{95 \%}.
-      \end{itemize}
+      \begin{carte}{vert}{Avantages}
+        \begin{itemize}\itemsep1pt
+          \item Marche dès le premier clic.
+          \item Un article nouveau est recommandable aussitôt.
+        \end{itemize}
+      \end{carte}
     \end{column}
     \begin{column}{0.48\textwidth}
-      \textcolor{red!70!black}{\textbf{Inconvénients}}
-      \begin{itemize}\itemsep2pt
-        \item HitRate@5 sur test = \textbf{0,0415} ;
-        \item \textbf{cold start} : inutile pour un lecteur ou un article nouveau ;
-        \item limite structurelle — un article publié il y a deux heures n'a
-              presque aucune co-lecture, le collaboratif ne peut pas le proposer ;
-        \item réglages sensibles et \pointfort{couplés} entre eux.
-      \end{itemize}
+      \begin{carte}{rouge}{Inconvénients}
+        \begin{itemize}\itemsep1pt
+          \item Précision faible.
+          \item Sans limite de date, propose des articles anciens.
+        \end{itemize}
+      \end{carte}
     \end{column}
   \end{columns}
-  \aretenir{Balayés \textbf{séparément} sur validation, les deux gagnants étaient
-    72 h et 16 facteurs. Croisés, ils donnent \textbf{0,0110} — la pire des quatre
-    combinaisons ; 24 h + 16 facteurs donne \textbf{0,0345}. On ne juxtapose pas
-    des optima partiels.}
-\end{frame}
-
-\begin{frame}{Collaboratif SVD (\texttt{Surprise})}
-  \framesubtitle{Trois définitions de note, trois résultats}
-  \centering
-  \scriptsize
-  \begin{tabular}{@{}lccl@{}}
-    \toprule
-    \textbf{Définition de la note} & \textbf{HitRate@5} & \textbf{Person.} &
-    \textbf{Verdict} \\
-    \midrule
-    Étoiles de l'article (log des clics) & 0,0015 & 23 \% &
-      ne classe pas \\
-    Binaire + 1 négatif échantillonné   & 0,0080 & 46 \% & insuffisant \\
-    Binaire + 4 négatifs échantillonnés & 0,0815\,$^*$ & 34 \% &
-      meilleure variante \\
-    \bottomrule
-  \end{tabular}
-
-  \vspace{0.8em}
-  \raggedright\scriptsize
-  \begin{columns}[t]
-    \begin{column}{0.48\textwidth}
-      \textcolor{vert}{\textbf{Avantages}}
-      \begin{itemize}\itemsep2pt
-        \item bien posée — binaire + 4 négatifs — c'est la meilleure des trois
-              variantes sur validation ;
-        \item implémentation directe, entraînement rapide, peu de réglages.
-      \end{itemize}
-    \end{column}
-    \begin{column}{0.48\textwidth}
-      \textcolor{red!70!black}{\textbf{Inconvénients}}
-      \begin{itemize}\itemsep2pt
-        \item \pointfort{ne se reproduit pas} : 0,0815 en validation, mais
-              \textbf{0,0220} sur test — un facteur 3,7 ;
-        \item les étoiles ne classent pas du tout (0,0015) : la note ne dépend que
-              de l'article, le modèle apprend « quels articles sont lus », pas
-              « qui lit quoi » ;
-        \item même cold start que l'ALS ; personnalisation 34 \% seulement.
-      \end{itemize}
-    \end{column}
-  \end{columns}
-  \aretenir{Même bibliothèque, même algorithme : c'est la \pointfort{formulation
-    du problème} qui change tout, pas l'outil. Et c'est une période de test
-    intacte qui révèle qu'un réglage ne s'est pas reproduit.}
-\end{frame}
-
-\begin{frame}{Comment nous avons su que les premiers chiffres étaient faux}
-  \framesubtitle{Découpage temporel 60 / 20 / 20}
-  \small
-  \begin{itemize}
-    \item Première évaluation : ALS entraîné sur 100 \% des clics, puis mesuré en
-          retirant le dernier clic de chaque lecteur — un clic que le modèle avait
-          déjà vu. HitRate@5 = \textbf{0,2415}.
-    \item Avec un découpage temporel correct, il tombe à \textbf{0,0415} —
-          \pointfort{un facteur 5,8} de précision imaginaire, invisible sans
-          découpage.
-    \item La popularité, elle, ne profite pas de la fuite : son classement ne
-          dépend pas du lecteur. Seuls les modèles \emph{personnalisés} peuvent
-          recopier ce qu'ils ont appris d'un lecteur.
-    \item Temporel et non aléatoire : sur un flux d'actualité, un découpage
-          aléatoire laisse le modèle apprendre des clics \emph{postérieurs} à ceux
-          qu'il doit prédire.
-    \item Le réglage se fait sur la validation ; le test ne sert qu'à la mesure
-          finale, une seule fois.
-  \end{itemize}
-
   \vspace{0.5em}
-  \centering
-  \begin{tikzpicture}[every node/.style={font=\scriptsize, text=white,
-        minimum height=0.9cm, align=center}]
-    \node[fill=accent,  minimum width=6cm]   (a) {60 \% entraînement};
-    \node[fill=accent2, minimum width=2.6cm, right=0pt of a] (b) {20 \% validation};
-    \node[fill=primary, minimum width=2.6cm, right=0pt of b] (c) {20 \% test};
-  \end{tikzpicture}
-
-  {\scriptsize\color{gris} le temps s'écoule de gauche à droite — aucune fuite du
-   futur vers le passé}
+  \troischiffres{0,0200}{PRÉCISION (HITRATE@5)}{0,27 \%}{COUVERTURE DU CATALOGUE}{96 \%}{PERSONNALISATION}
 \end{frame}
 
-\begin{frame}{Résultat principal : la fraîcheur pèse plus que le modèle}
-  \framesubtitle{Le résultat le plus important de l'évaluation}
-  \centering
-  \includegraphics[width=0.97\textwidth]{figures/fraicheur.pdf}
+\begin{frame}{L'ALS personnalise, mais démarre mal}
+  \framesubtitle{Collaboratif ALS}
+  {\small Factorisation des clics ; les cases vides comptent comme négatifs.}
 
   \vspace{0.3em}
-  \raggedright\footnotesize
-  \begin{itemize}\itemsep2pt
-    \item \pointfort{Facteur 42} entre la première et la dernière barre, sans
-          changer une ligne d'algorithme.
-    \item Explication : \textbf{48 \%} des articles lus pendant la période évaluée
-          n'existaient pas encore pendant l'entraînement.
-    \item Conséquence produit : recalculer la fenêtre en continu compte davantage
-          que raffiner le modèle.
-  \end{itemize}
-\end{frame}
-
-\begin{frame}{Quatre critères, pas un seul}
-  \framesubtitle{La précision seule désigne toujours la popularité}
-  \centering
-  \scriptsize
-  \begin{tabular}{@{}llrr@{}}
-    \toprule
-    \textbf{Critère} & \textbf{Ce qu'il mesure} & \textbf{Popularité} &
-    \textbf{Contenu} \\
-    \midrule
-    HitRate@5        & un article recommandé a été lu      & 0,2525 & 0,0200 \\
-    Couverture       & part du catalogue exposée           & 0,003 \% & 0,27 \% \\
-    Personnalisation & différence entre deux listes        & 4 \%   & 96 \% \\
-    Recall@5         & part du futur devinée (plafond 0,76)& 0,0555 & 0,0034 \\
-    \bottomrule
-  \end{tabular}
-
-  \vspace{0.8em}
-  \raggedright\small
-  \begin{itemize}\itemsep3pt
-    \item La popularité est 12 fois plus précise, mais expose \textbf{11 articles
-          sur 364 047} : un éditeur y perd son catalogue.
-    \item Aucun critère ne sauve le \pointfort{SVD sur étoiles} : HitRate nul et
-          personnalisation 12 \%, contre 96 \% pour le contenu. Il ne trouve rien
-          \emph{et} ne distingue presque pas les lecteurs — parce que sa note ne
-          dépend que de l'article.
-  \end{itemize}
-\end{frame}
-
-\begin{frame}{Résultat final sur la période de test}
-  \framesubtitle{Chaque approche dans sa meilleure configuration}
-  \centering
-  \includegraphics[width=0.97\textwidth]{figures/compromis.pdf}
-
-  \vspace{0.3em}
-  \raggedright\footnotesize
-  \begin{itemize}\itemsep2pt
-    \item Retenu : \pointfort{4 populaires (1 h) + 1 contenu} — la place donnée au
-          contenu ne coûte rien en précision (écart non significatif) et
-          \textbf{multiplie la couverture par 38}.
-    \item Les deux collaboratifs restent en bas à gauche : un ordre de grandeur
-          moins précis que la popularité \emph{et} vingt fois moins couvrants que
-          le contenu. Disponibles dans l'application, ils ne sont pas servis.
-  \end{itemize}
-\end{frame}
-
-\begin{frame}{Le système de recommandation retenu}
-  \framesubtitle{Ce qui tourne en production : la stratégie « mixte »}
-  \centering
-  \begin{tikzpicture}[every node/.style={font=\scriptsize, align=center},
-      place/.style={draw=primary, thick, rounded corners, text width=1.5cm,
-                    minimum height=0.85cm, text=white}]
-    \node[place, fill=accent]  (p1) {1};
-    \node[place, fill=accent, right=2mm of p1]  (p2) {2};
-    \node[place, fill=accent, right=2mm of p2]  (p3) {3};
-    \node[place, fill=accent, right=2mm of p3]  (p4) {4};
-    \node[place, fill=accent2, right=2mm of p4] (p5) {5};
-    \node[below=1mm of p2.south east, font=\scriptsize, text=primary]
-      {\textbf{4 places} — les plus lus de la \textbf{dernière heure}};
-    \node[below=1mm of p5.south, font=\scriptsize, text=primary, text width=2.6cm]
-      {\textbf{1 place} — contenu, vivier 6 h};
-  \end{tikzpicture}
-
-  \vspace{1.4em}
-  \raggedright\scriptsize
-  \begin{columns}[t]
+  \begin{columns}[T]
     \begin{column}{0.48\textwidth}
-      \textcolor{vert}{\textbf{Pourquoi ce partage}}
-      \begin{itemize}\itemsep2pt
-        \item la place donnée au contenu ne coûte pas de justesse mesurable ;
-        \item elle multiplie par \textbf{38} la part de catalogue exposée ;
-        \item meilleur compromis justesse / couverture des cinq approches.
-      \end{itemize}
+      \begin{carte}{vert}{Avantages}
+        \begin{itemize}\itemsep1pt
+          \item Capte des goûts que le contenu ne voit pas.
+          \item Surprend, hors du thème déjà lu.
+        \end{itemize}
+      \end{carte}
     \end{column}
     \begin{column}{0.48\textwidth}
-      \textcolor{accent}{\textbf{Jamais de liste vide}}
-      \begin{itemize}\itemsep2pt
-        \item cascade de repli à quatre niveaux : région $\cap$ fraîcheur,
-              puis fraîcheur, puis région, puis tout l'historique ;
-        \item \texttt{history} transmis dans la requête : un lecteur inconnu du
-              service est tout de même personnalisé.
-      \end{itemize}
+      \begin{carte}{rouge}{Inconvénients}
+        \begin{itemize}\itemsep1pt
+          \item Inutile pour un lecteur ou un article nouveau.
+          \item Réglages couplés : difficiles à optimiser.
+        \end{itemize}
+      \end{carte}
+    \end{column}
+  \end{columns}
+  \vspace{0.5em}
+  \troischiffres{0,0415}{PRÉCISION (HITRATE@5)}{0,015 \%}{COUVERTURE DU CATALOGUE}{95 \%}{PERSONNALISATION}
+\end{frame}
+
+\begin{frame}{Le SVD ne se reproduit pas}
+  \framesubtitle{Collaboratif SVD}
+  {\small Une note prédite à partir des clics ; une seule définition classe.}
+
+  \vspace{0.3em}
+  \begin{columns}[T]
+    \begin{column}{0.48\textwidth}
+      \begin{carte}{vert}{Avantages}
+        \begin{itemize}\itemsep1pt
+          \item Bien posé en binaire, avec 4 négatifs.
+          \item Rapide à entraîner.
+        \end{itemize}
+      \end{carte}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \begin{carte}{rouge}{Inconvénients}
+        \begin{itemize}\itemsep1pt
+          \item \pointfort{0,0815} en validation, \textbf{0,0220} sur le test.
+          \item Même démarrage à froid que l'ALS.
+        \end{itemize}
+      \end{carte}
+    \end{column}
+  \end{columns}
+  \vspace{0.5em}
+  \troischiffres{0,0220}{PRÉCISION (HITRATE@5)}{0,010 \%}{COUVERTURE DU CATALOGUE}{56 \%}{PERSONNALISATION}
+\end{frame}
+
+\begin{frame}{Le premier score était 5,8 fois trop haut}
+  \framesubtitle{Comment nous avons su que les chiffres étaient faux}
+  \begin{columns}[T]
+    \begin{column}{0.6\textwidth}
+      {\normalsize Le modèle avait déjà vu le clic qu'il devait deviner.}
+
+      \vspace{0.9em}
+      \begin{tikzpicture}
+        \node[anchor=south west, inner sep=0] at (0,1.0) {Retrait aléatoire du dernier clic};
+        \fill[rouge, rounded corners=2pt] (0,0.55) rectangle (5.2,0.9);
+        \node[anchor=west, font=\ttfamily\normalsize, inner sep=0] at (5.4,0.72) {0,2415};
+        \node[anchor=south west, inner sep=0] at (0,-0.1) {Découpage par date};
+        \fill[vert, rounded corners=2pt] (0,-0.55) rectangle (0.89,-0.2);
+        \node[anchor=west, font=\ttfamily\normalsize, inner sep=0] at (1.1,-0.37) {0,0415};
+      \end{tikzpicture}
+
+      \vspace{1.2em}
+      {\small Découpage : 60\,\% entraînement, 20\,\% validation, 20\,\% test. Le test est mesuré une seule fois.}
+    \end{column}
+    \begin{column}{0.36\textwidth}
+      \centering
+      \vspace{0.6em}
+      {\fontsize{54}{56}\selectfont\fbold\color{signal}$\times$5,8}\\[4pt]
+      {\ttfamily\scriptsize\color{gris}DE PRÉCISION IMAGINAIRE}
     \end{column}
   \end{columns}
 \end{frame}
 
-% ═════════════════ PARTIE 2 — Fonctionnalités (6 min, 5 diapos) ═══════════
-\begin{frame}{Partie 2 — Les stratégies dans l'application}
+\begin{frame}{La fraîcheur pèse plus que le modèle}
+  \framesubtitle{Résultat principal}
+  \begin{columns}[T]
+    \begin{column}{0.33\textwidth}
+      {\fontsize{70}{72}\selectfont\fbold\color{signal}$\times$42}\\[2pt]
+      {\ttfamily\scriptsize\color{gris}ENTRE LA PREMIÈRE ET LA DERNIÈRE BARRE}
+    \end{column}
+    \begin{column}{0.63\textwidth}
+      {\normalsize Même algorithme : seule la fenêtre de comptage change.}
+
+      \vspace{0.5em}
+      \begin{tikzpicture}
+        \node[anchor=west, inner sep=0] at (0,0.1) {1 heure};
+        \fill[surf, rounded corners=2pt] (2.7,-0.1) rectangle (7.7,0.32); \fill[signal, rounded corners=2pt] (2.7,-0.1) rectangle (7.7,0.32);
+        \node[anchor=west, font=\ttfamily\normalsize, inner sep=0] at (7.85,0.11) {0,2525};
+        \node[anchor=west, inner sep=0] at (0,-0.85) {6 heures};
+        \fill[surf, rounded corners=2pt] (2.7,-1.05) rectangle (7.7,-0.63); \fill[accent, rounded corners=2pt] (2.7,-1.05) rectangle (5.85,-0.63);
+        \node[anchor=west, font=\ttfamily\normalsize, inner sep=0] at (7.85,-0.84) {0,1590};
+        \node[anchor=west, inner sep=0] at (0,-1.8) {24 heures};
+        \fill[surf, rounded corners=2pt] (2.7,-2.0) rectangle (7.7,-1.58); \fill[accent, rounded corners=2pt] (2.7,-2.0) rectangle (3.62,-1.58);
+        \node[anchor=west, font=\ttfamily\normalsize, inner sep=0] at (7.85,-1.79) {0,0465};
+        \node[anchor=west, inner sep=0] at (0,-2.75) {tout l'historique};
+        \fill[surf, rounded corners=2pt] (2.7,-2.95) rectangle (7.7,-2.53); \fill[accent, rounded corners=2pt] (2.7,-2.95) rectangle (2.82,-2.53);
+        \node[anchor=west, font=\ttfamily\normalsize, inner sep=0] at (7.85,-2.74) {0,0060};
+      \end{tikzpicture}
+    \end{column}
+  \end{columns}
+  \aretenir{48\,\% des articles lus pendant la période évaluée n'existaient pas encore à l'entraînement.}
+\end{frame}
+
+\begin{frame}{Le mixte est à la fois précis et varié}
+  \framesubtitle{Résultat final sur la période de test}
+  \begin{columns}[T]
+    \begin{column}{0.6\textwidth}
+      \begin{tikzpicture}[x=0.9cm, y=0.9cm]
+        \draw[ligne] (0,0.338) -- (8.4,0.338); \draw[ligne] (0,1.341) -- (8.4,1.341);
+        \draw[ligne] (0,2.256) -- (8.4,2.256); \draw[ligne] (0,3.259) -- (8.4,3.259); \draw[ligne] (0,4.174) -- (8.4,4.174);
+        \node[anchor=east, font=\footnotesize, text=gris] at (-0.1,0.338) {0,003};
+        \node[anchor=east, font=\footnotesize, text=gris] at (-0.1,1.341) {0,01};
+        \node[anchor=east, font=\footnotesize, text=gris] at (-0.1,2.256) {0,03};
+        \node[anchor=east, font=\footnotesize, text=gris] at (-0.1,3.259) {0,1};
+        \node[anchor=east, font=\footnotesize, text=gris] at (-0.1,4.174) {0,3};
+        \node[anchor=north, font=\footnotesize, text=gris] at (0,-0.05) {0};
+        \node[anchor=north, font=\footnotesize, text=gris] at (3.111,-0.05) {0,1};
+        \node[anchor=north, font=\footnotesize, text=gris] at (6.222,-0.05) {0,2};
+        \draw[gris] (0,0) -- (8.4,0); \draw[gris] (0,0) -- (0,4.6);
+        \node[font=\footnotesize, text=gris, anchor=north] at (4.2,-0.5) {Précision (HitRate@5)};
+        \node[font=\footnotesize, text=gris, rotate=90, anchor=south] at (-1.15,2.3) {Couverture du catalogue, \%};
+        \fill[accent] (7.856,0.338) circle (0.15); \node[anchor=south east, font=\normalsize\bfseries] at (7.75,0.48) {Popularité};
+        \fill[signal] (7.78,3.383) circle (0.22);  \node[anchor=south east, font=\normalsize\bfseries, text=signal] at (7.5,3.55) {Mixte};
+        \fill[accent] (1.291,1.679) circle (0.15); \node[anchor=west, font=\normalsize\bfseries] at (1.55,1.679) {ALS};
+        \fill[accent] (0.684,1.341) circle (0.15); \node[anchor=north west, font=\normalsize\bfseries] at (0.8,1.15) {SVD};
+        \fill[accent] (0.622,4.08) circle (0.15);  \node[anchor=west, font=\normalsize\bfseries] at (0.95,4.08) {Contenu};
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.34\textwidth}
+      \begin{carte}{signal}{Retenu}
+        \textbf{Le mixte.}\\
+        Aussi précis que la popularité, avec \pointfort{38 fois plus} de catalogue exposé.
+      \end{carte}
+      \vspace{0.6em}
+      {\small En haut à droite, c'est précis et varié. La popularité n'expose que 11 articles sur 364\,047.}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Quatre places au récent, une au contenu}
+  \framesubtitle{Le système de recommandation retenu}
+  \begin{tikzpicture}
+    \node[blocA, minimum width=1.7cm, minimum height=1.7cm, font=\fbold\huge] at (0,0) {1};
+    \node[blocA, minimum width=1.7cm, minimum height=1.7cm, font=\fbold\huge] at (2.1,0) {2};
+    \node[blocA, minimum width=1.7cm, minimum height=1.7cm, font=\fbold\huge] at (4.2,0) {3};
+    \node[blocA, minimum width=1.7cm, minimum height=1.7cm, font=\fbold\huge] at (6.3,0) {4};
+    \node[blocS, minimum width=1.7cm, minimum height=1.7cm, font=\fbold\huge] at (8.4,0) {5};
+    \node[anchor=north west, inner sep=0] at (-0.85,-1.15) {\small les plus lus de la \textbf{dernière heure}};
+    \node[anchor=north east, inner sep=0, text=signal] at (9.25,-1.15) {\small \textbf{contenu}};
+    \node[anchor=west, inner sep=0] at (10.4,0.2) {{\fontsize{34}{36}\selectfont\fbold\color{signal}$\times$38}};
+    \node[anchor=west, inner sep=0] at (10.4,-0.7) {\ttfamily\scriptsize\color{gris}CATALOGUE EXPOSÉ};
+  \end{tikzpicture}
+
+  \vspace{1.9em}
+  {\normalsize La place du contenu coûte environ 1\,\% de précision : le meilleur compromis mesuré entre justesse et couverture.}
+\end{frame}
+
+\begin{frame}{Jamais de liste vide : quatre filets}
+  \framesubtitle{Le lecteur dont on ne sait rien}
+  \begin{tikzpicture}
+    \node[blocA, text width=2.2cm, minimum height=1.9cm] (a) at (0,0) {\ttfamily\small 1\\[2pt]\normalsize\rmfamily région et fraîcheur};
+    \node[bloc, text width=2.2cm, minimum height=1.9cm, right=9mm of a] (b) {\ttfamily\small 2\\[2pt]\normalsize\rmfamily fraîcheur seule};
+    \node[bloc, text width=2.2cm, minimum height=1.9cm, right=9mm of b] (c) {\ttfamily\small 3\\[2pt]\normalsize\rmfamily région seule};
+    \node[bloc, text width=2.2cm, minimum height=1.9cm, right=9mm of c] (d) {\ttfamily\small 4\\[2pt]\normalsize\rmfamily tout l'historique};
+    \draw[fl] (a) -- (b); \draw[fl] (b) -- (c); \draw[fl] (c) -- (d);
+  \end{tikzpicture}
+
+  \vspace{1.2em}
+  {\normalsize On passe au filet suivant quand le précédent ne trouve rien. Un lecteur inconnu reçoit donc quand même cinq articles.}
+  \aretenir{Un historique transmis dans la requête (\mono{history}) personnalise même un lecteur que le service ne connaît pas.}
+\end{frame}
+
+% ═════════════════ PARTIE 2 — L'application (6 min, 3 diapos) ═══════════════
+\begin{frame}{Une case décochée, le facteur 42 apparaît}
+  \framesubtitle{L'application}
   \label{diapo:interface}
-  \framesubtitle{6 minutes \textperiodcentered\ le même lecteur, une seule case
-    décochée}
-  \begin{columns}[t]
+  \begin{columns}[T]
     \begin{column}{0.485\textwidth}
-      \centering\scriptsize
-      \textbf{Fraîcheur activée} — fenêtre 1 h\\[3pt]
-      \includegraphics[width=\linewidth]{figures/app_liste_fraiche.png}
+      {\ttfamily\scriptsize\color{accent}FRAÎCHEUR ACTIVÉE · FENÊTRE 1 H}\\[3pt]
+      \fbox{\includegraphics[width=\linewidth, height=0.4\textheight, keepaspectratio]{figures/app_liste_fraiche.png}}
     \end{column}
     \begin{column}{0.485\textwidth}
-      \centering\scriptsize
-      \textcolor{gris}{Fraîcheur désactivée} — tout le catalogue\\[3pt]
-      \includegraphics[width=\linewidth]{figures/app_liste_sans_fraicheur.png}
+      {\ttfamily\scriptsize\color{gris}FRAÎCHEUR DÉSACTIVÉE · TOUT}\\[3pt]
+      \fbox{\includegraphics[width=\linewidth, height=0.4\textheight, keepaspectratio]{figures/app_liste_sans_fraicheur.png}}
+    \end{column}
+  \end{columns}
+  \vspace{0.6em}
+  {\small À gauche, des articles du 16/10 lus par des milliers de lecteurs. À droite, un article du 25/09 lu par \textbf{une} personne.}
+\end{frame}
+
+\begin{frame}{Un lecteur inscrit est servi aussitôt}
+  \framesubtitle{L'application}
+  \begin{columns}[T]
+    \begin{column}{0.47\textwidth}
+      {\ttfamily\scriptsize\color{accent}INSCRIPTION · RÉGION OPTIONNELLE}\\[3pt]
+      \fbox{\includegraphics[width=\linewidth, height=0.4\textheight, keepaspectratio]{figures/app_bloc_inscription.png}}
+    \end{column}
+    \begin{column}{0.47\textwidth}
+      {\ttfamily\scriptsize\color{accent}CATALOGUE · 364\,047 ARTICLES}\\[3pt]
+      \fbox{\includegraphics[width=\linewidth, height=0.4\textheight, keepaspectratio]{figures/app_bloc_catalogue.png}}
+    \end{column}
+  \end{columns}
+  \vspace{0.6em}
+  {\small À chaque article lu, le profil est recalculé à la demande, \pointfort{sans ré-entraînement}.}
+\end{frame}
+
+\begin{frame}{Un nouvel article, recommandé en minutes}
+  \framesubtitle{L'application}
+  \begin{tikzpicture}
+    \node[blocA, text width=3.2cm, minimum height=1.5cm] (a) {\textbf{Embedding}\\250 dimensions};
+    \node[blocS, text width=3.2cm, minimum height=1.5cm, right=9mm of a] (b) {\textbf{Projection ACP}\\sauvegardée};
+    \node[blocI, text width=3.2cm, minimum height=1.5cm, right=9mm of b] (c) {\textbf{Catalogue}\\50 dimensions};
+    \draw[flA] (a) -- (b); \draw[flA] (b) -- (c);
+  \end{tikzpicture}
+
+  \vspace{1.2em}
+  \begin{columns}[T]
+    \begin{column}{0.28\textwidth}
+      {\fontsize{32}{34}\selectfont\fbold\color{accent}51\,Ko}\\[-1pt]
+      {\small la projection ACP}
+    \end{column}
+    \begin{column}{0.66\textwidth}
+      {\normalsize Sauvegardée avec le catalogue, elle place un nouvel article sans réajuster l'ACP ni recalculer les 364\,047 vecteurs existants.}
+    \end{column}
+  \end{columns}
+  \aretenir{Vérifié : trois articles ajoutés sont entrés aussitôt dans le top-5 d'un lecteur proche, sans ré-entraînement.}
+\end{frame}
+
+% ═══════════════ PARTIE 3 — Architecture (4 min, 5 diapos) ═══════════════
+\begin{frame}{Serverless, sans API devant le modèle}
+  \framesubtitle{Architecture retenue : l'architecture 2}
+  \begin{tikzpicture}
+    \node[bloc, text width=2.2cm, minimum height=1.6cm, fill=surf, draw=surf] (app) at (0,0) {Application\\locale};
+    \node[blocI, text width=3.1cm, minimum height=2.0cm, right=15mm of app] (fn) {\textbf{Azure Function}\\\ttfamily\small /api/recommend};
+    \node[bloc, text width=3.4cm, minimum height=1.35cm, right=10mm of fn, yshift=11mm, draw=signal, line width=1.2pt] (hot)
+      {\textbf{Fraîcheur}\\{\small 23\,Ko · blob input binding}};
+    \node[bloc, text width=3.4cm, minimum height=1.35cm, right=10mm of fn, yshift=-11mm, dashed, draw=accent, line width=1pt] (cold)
+      {\textbf{Artefacts lourds}\\{\small 253\,Mo · SDK et cache}};
+    \draw[fl] ([yshift=3.5mm]app.east) -- node[above, font=\ttfamily\scriptsize] {user\_id} ([yshift=3.5mm]fn.west);
+    \draw[fl] ([yshift=-3.5mm]fn.west) -- node[below, font=\ttfamily\scriptsize] {5 ids} ([yshift=-3.5mm]app.east);
+    \draw[flS] (hot.west) -- (fn.north east);
+    \draw[flA, dashed] (cold.west) -- (fn.south east);
+  \end{tikzpicture}
+  \aretenir{La Function lit Blob Storage elle-même : pas de serveur d'API à maintenir. Elle ne garde \textbf{aucun état} entre deux requêtes.}
+\end{frame}
+
+\begin{frame}{Deux accès à Blob Storage, pas un}
+  \framesubtitle{Pourquoi le binding ne porte que la fraîcheur}
+  \begin{columns}[T]
+    \begin{column}{0.48\textwidth}
+      \begin{carte}{signal}{Binding · 23 Ko}
+        Relu \textbf{à chaque appel} : exactement ce qu'il faut pour la fenêtre de fraîcheur, qui change toutes les heures.
+      \end{carte}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \begin{carte}{accent}{SDK et cache · 253 Mo}
+        Lus \textbf{une seule fois} par instance, au démarrage à froid, puis gardés en mémoire.
+      \end{carte}
     \end{column}
   \end{columns}
 
+  \vspace{1.1em}
+  {\normalsize Si le binding portait les 253 Mo, le cache disparaîtrait :}
+
   \vspace{0.4em}
-  \raggedright\scriptsize
-  \begin{itemize}\itemsep1pt
-    \item À gauche, le 16/10 et 3 784 à 10 627 lecteurs ; à droite, le 25/09 et un
-          article lu par \textbf{une} personne — \pointfort{le facteur 42, rendu
-          visible}.
-    \item Cinquième place à gauche : \#284220 du \textbf{17/10}, neuf lecteurs.
-          C'est la place du contenu, et la popularité ne la trouverait jamais.
-  \end{itemize}
-\end{frame}
-
-\begin{frame}{Un lecteur dont on ne sait rien}
-  \framesubtitle{Le cas le plus fréquent sur un portail d'actualité}
-  \centering
-  \begin{tikzpicture}[node distance=7mm, every node/.style={font=\scriptsize},
-      bloc/.style={draw=primary, thick, rounded corners, text width=2.7cm,
-                   align=center, minimum height=1.1cm, text=white}]
-    \node[bloc, fill=gris]    (a) {Aucun historique};
-    \node[bloc, fill=accent,  right=of a] (b) {Articles récents\\les plus lus};
-    \node[bloc, fill=accent2, right=of b] (c) {Région connue :\\articles récents\\de sa région};
-    \draw[-{Latex[length=2mm]}, gris, thick] (a) -- (b);
-    \draw[-{Latex[length=2mm]}, gris, thick] (b) -- (c);
+  \begin{tikzpicture}
+    \node[anchor=west, inner sep=0] at (0,0.5) {Avec le cache};
+    \fill[vert, rounded corners=2pt] (4.4,0.33) rectangle (4.7,0.68);
+    \node[anchor=west, font=\ttfamily\normalsize, inner sep=0] at (4.85,0.5) {0,2 s par appel};
+    \node[anchor=west, inner sep=0] at (0,-0.2) {Binding sur 253 Mo};
+    \fill[rouge, rounded corners=2pt] (4.4,-0.37) rectangle (10.4,-0.02);
+    \node[anchor=west, font=\ttfamily\normalsize, inner sep=0] at (10.55,-0.2) {8 s};
   \end{tikzpicture}
-
-  \vspace{1em}
-  \raggedright\small
-  \begin{itemize}\itemsep4pt
-    \item \textbf{Cascade de repli} : région croisée avec la fraîcheur, puis
-          fraîcheur, puis région, puis historique complet. Aucune requête ne
-          renvoie de liste vide.
-    \item La région est la seule information exploitable sur un lecteur inconnu :
-          27 régions retenues, celles ayant assez de clics pour un classement.
-    \item Dès le premier article lu, le profil de contenu prend le relais —
-          \pointfort{sans aucun ré-entraînement}.
-  \end{itemize}
 \end{frame}
 
-\begin{frame}{Inscrire un lecteur, voir son profil se former}
-  \framesubtitle{En direct, sans ré-entraînement}
-  \begin{columns}[t]
-    \begin{column}{0.47\textwidth}
-      \centering\scriptsize
-      \textbf{Inscription} — région optionnelle\\[3pt]
-      \includegraphics[width=\linewidth, height=0.40\textheight,
-                       keepaspectratio]{figures/app_bloc_inscription.png}
+\begin{frame}{Quatre défaillances sans la moindre erreur}
+  \framesubtitle{Ce qui sépare un service d'une démonstration}
+  \begin{columns}[T]
+    \begin{column}{0.485\textwidth}
+      \begin{carte}{signal}{Dérive d'artefact}
+        \small Cache jugé sur la taille \textbf{et} la date du blob.
+      \end{carte}
+      \vspace{0.5em}
+      \begin{carte}{accent}{Catalogue incohérent}
+        \small Tout identifiant hors catalogue est filtré.
+      \end{carte}
     \end{column}
-    \begin{column}{0.47\textwidth}
-      \centering\scriptsize
-      \textbf{Catalogue} — 364 047 articles\\[3pt]
-      \includegraphics[width=\linewidth, height=0.40\textheight,
-                       keepaspectratio]{figures/app_bloc_catalogue.png}
+    \begin{column}{0.485\textwidth}
+      \begin{carte}{signal}{Cache périmé}
+        \small Le conteneur est énuméré, pas lu dans une liste figée.
+      \end{carte}
+      \vspace{0.5em}
+      \begin{carte}{accent}{Requêtes concurrentes}
+        \small L'historique d'un appel ne fuit pas vers un autre.
+      \end{carte}
     \end{column}
   \end{columns}
-
-  \vspace{0.4em}
-  \raggedright\scriptsize
-  \begin{itemize}\itemsep1pt
-    \item Recommandations \textbf{immédiates} à l'inscription ; à chaque article lu,
-          le profil — moyenne des vecteurs lus — est recalculé à la demande,
-          \pointfort{sans ré-entraînement}.
-    \item Le catalogue a une raison d'être : sans lui, le lecteur ne cliquerait que
-          ce que le modèle propose déjà, et son profil ne ferait que se renforcer.
-    \item L'historique est \pointfort{transmis dans la requête} : la Function
-          recommande un lecteur qu'elle ne connaît pas, sans état.
-  \end{itemize}
+  \aretenir{Le service répond 200 avec de mauvaises recommandations : les deux premières ont été vues en comparant avec le local.}
 \end{frame}
 
-\begin{frame}{Publier un nouvel article}
-  \framesubtitle{Disponible en minutes, sans ré-entraînement}
-  \centering
-  \begin{tikzpicture}[node distance=7mm, every node/.style={font=\scriptsize},
-      bloc/.style={draw=primary, thick, rounded corners, text width=2.7cm,
-                   align=center, minimum height=1cm, text=white}]
-    \node[bloc, fill=accent]  (a) {Embedding\\250 dimensions};
-    \node[bloc, fill=accent2, right=of a] (b) {Projection ACP\\sauvegardée};
-    \node[bloc, fill=primary, right=of b] (c) {Ajout au catalogue\\(50 dimensions)};
-    \draw[-{Latex[length=2mm]}, gris, thick] (a) -- (b);
-    \draw[-{Latex[length=2mm]}, gris, thick] (b) -- (c);
+\begin{frame}{Un cœur unique, des copies générées}
+  \framesubtitle{Le service et l'application qui l'appelle}
+  \begin{tikzpicture}
+    \node[blocI, text width=7cm, minimum height=1cm] (art) at (4.0,0) {Artefacts produits hors-ligne};
+    \node[blocA, text width=3.6cm, minimum height=1.4cm] (az) at (1.4,-2.2) {\textbf{Azure Function}\\+ Blob Storage};
+    \node[bloc, text width=3.6cm, minimum height=1.4cm, fill=surf, draw=surf] (loc) at (6.6,-2.2) {\textbf{Application}\\qui l'appelle};
+    \draw[flA] (art.south) -- (az.north); \draw[flA] (art.south) -- (loc.north);
+    \draw[fl] (loc.west) -- node[above, font=\ttfamily\footnotesize] {HTTP} (az.east);
   \end{tikzpicture}
-
-  \vspace{1em}
-  \raggedright\small
-  \begin{itemize}\itemsep4pt
-    \item La projection ACP est sérialisée avec le catalogue (\textbf{51 Ko}) :
-          sans elle, intégrer un article imposerait de réajuster l'ACP, donc de
-          recalculer les 364 047 vecteurs existants.
-    \item Vérifié : trois articles ajoutés reçoivent les identifiants
-          364047--364049 et \textbf{entrent immédiatement} dans le top-5 d'un
-          lecteur proche.
-    \item L'article n'a ni étoiles ni facteurs collaboratifs — il n'a aucun clic.
-          Il est recommandé par le contenu, seul signal disponible à cet instant.
-  \end{itemize}
+  \aretenir{À l'inférence, \pointfort{numpy seul} : scikit-learn, implicit et Surprise ne servent qu'hors-ligne. L'application ne calcule rien, c'est la Function qui recommande.}
 \end{frame}
 
-% ═══════════════ PARTIE 3 — Architecture retenue et cible (4 min, 5 diapos) ══════════
-\begin{frame}{Partie 3 — Architecture retenue : l'architecture 2}
-  \framesubtitle{Serverless \emph{sans} API dédiée — la Function lit Blob Storage elle-même}
-  \centering
-  \begin{tikzpicture}[every node/.style={font=\scriptsize, align=center},
-      app/.style={draw=gris, thick, rounded corners, text width=2.4cm,
-                  minimum height=1.2cm, fill=clair, text=primary},
-      fn/.style={draw=primary, very thick, rounded corners, text width=3.9cm,
-                 minimum height=1.6cm, fill=primary, text=white},
-      hot/.style={draw=accent2, very thick, rounded corners, text width=3.7cm,
-                  minimum height=1.15cm, fill=accent2, text=white},
-      cold/.style={draw=accent, thick, rounded corners, text width=3.7cm,
-                   minimum height=1.15cm, fill=accent, text=white}]
+\begin{frame}{Seule la voie du bas ré-entraîne}
+  \framesubtitle{Architecture cible}
+  \begin{tikzpicture}
+    \node[bloc, text width=2.1cm, font=\footnotesize] (clic) at (0,0) {Clics des lecteurs};
+    \node[blocA, text width=2.5cm, font=\footnotesize, right=5mm of clic] (ing) {Event Hub et fonction d'ingestion};
+    \node[blocP, text width=2.0cm, font=\footnotesize, right=5mm of ing] (prof) {Store de profils};
 
-    \node[fn] (fn) {\textbf{Azure Function}\\\texttt{/api/recommend}\\
-                    Recommender — \textbf{numpy seul}};
-    \node[app, left=12mm of fn] (app) {Application\\locale};
-    \node[hot,  right=14mm of fn, yshift=11mm]  (hot)
-      {\textbf{Fraîcheur} — 23 Ko\\\textbf{blob input binding}\\relu à \textbf{chaque appel} · 2 ms};
-    \node[cold, right=14mm of fn, yshift=-11mm] (cold)
-      {\textbf{Artefacts lourds} — 253 Mo\\SDK + cache\\démarrage à froid · 8 s};
+    \node[bloc, text width=2.1cm, font=\footnotesize, below=3mm of clic] (art) {Nouvel article};
+    \node[blocA, text width=2.5cm, font=\footnotesize, below=3mm of ing] (proj) {Embedding, projection ACP persistée};
+    \node[blocP, text width=2.0cm, font=\footnotesize, below=3mm of prof] (cat) {Catalogue};
 
-    \draw[-{Latex[length=2mm]}, gris, thick]
-      (app.north east) -- node[above, font=\tiny, text=primary] {\texttt{user\_id}} (fn.north west);
-    \draw[-{Latex[length=2mm]}, gris, thick]
-      (fn.south west) -- node[below, font=\tiny, text=primary] {5 \texttt{article\_id}} (app.south east);
-    \draw[-{Latex[length=2.4mm]}, accent2, ultra thick] (hot)  -- (fn);
-    \draw[-{Latex[length=2mm]}, accent, thick, dashed]  (cold) -- (fn);
-  \end{tikzpicture}
+    \node[bloc, text width=2.1cm, font=\footnotesize, below=3mm of art] (plan) {Planificateur};
+    \node[blocS, text width=2.5cm, font=\footnotesize, below=3mm of proj] (als) {Ré-entraînement ALS par lot};
+    \node[blocP, text width=2.0cm, font=\footnotesize, below=3mm of cat] (fact) {Facteurs versionnés};
 
-  \vspace{0.4em}
-  \raggedright\scriptsize
-  \begin{itemize}\itemsep2pt
-    \item \pointfort{Sans état.} La Function ne conserve rien entre deux requêtes :
-          le profil d'un lecteur qu'elle ne connaît pas arrive dans le paramètre
-          \texttt{history} de l'appel.
-    \item \pointfort{Mais pas sans mémoire.} L'instance \texttt{Recommender} est un
-          \textbf{singleton} réutilisé d'une invocation à l'autre : les 253 Mo sont
-          lus une seule fois par instance, au démarrage à froid, après
-          \textbf{découverte dynamique} du conteneur — le chargeur énumère les
-          blobs, il ne suit pas une liste figée.
-    \item \pointfort{Deux accès, pas un.} Le \emph{binding} relit son blob à chaque
-          invocation : ce qu'il faut pour 23 Ko qui changent toutes les heures.
-          Appliqué aux 253 Mo il supprimerait le cache — \textbf{8 s par appel au
-          lieu de 0,2 s}, 40 fois plus.
-  \end{itemize}
-\end{frame}
+    \node[blocI, text width=2.3cm, font=\footnotesize, right=9mm of cat] (api) {\textbf{API dédiée}\\architecture 1};
+    \node[bloc, text width=2.3cm, font=\footnotesize, below=4mm of api] (apps) {Applications};
 
-\begin{frame}{Ce qui sépare un service d'une démonstration}
-  \framesubtitle{Quatre défaillances silencieuses, et le garde-fou de chacune}
-  \centering
-  \scriptsize
-  \begin{tabular}{@{}p{3.3cm}p{5.1cm}p{4.2cm}@{}}
-    \toprule
-    \textbf{Défaillance} & \textbf{Garde-fou} & \textbf{Preuve} \\
-    \midrule
-    Dérive d'artefact\newline\textcolor{gris}{\tiny observée en production}
-      & validité du cache jugée sur la taille \textbf{et} la date du blob — un
-        modèle reconstruit de taille identique est retéléchargé
-      & \texttt{test\_meme\_taille\_}\newline\texttt{mais\_blob\_plus\_recent} \\[2pt]
-    Cache périmé\newline\textcolor{gris}{\tiny observée en production}
-      & le conteneur est \textbf{énuméré} à chaque démarrage ; une liste figée
-        avait fait manquer les artefacts ajoutés après elle
-      & \texttt{list\_blobs()}, trois artefacts requis contrôlés \\[2pt]
-    Catalogue incohérent
-      & tout identifiant hors catalogue est filtré, au chargement \emph{et} à
-        chaque requête — sinon l'indexation échoue
-      & \texttt{test\_historique\_hors\_}\newline\texttt{catalogue\_filtre} \\[2pt]
-    Interférence entre requêtes concurrentes
-      & la surcharge \texttt{history} vit dans un \texttt{threading.local},
-        remise à zéro en \texttt{finally} : le profil d'un appel ne fuit pas
-        vers un autre
-      & isolation par requête, \texttt{src/recommender.py} \\
-    \bottomrule
-  \end{tabular}
-
-  \vspace{0.6em}
-  \raggedright\scriptsize
-  \pointfort{Aucune de ces quatre défaillances ne lève d'erreur.} Le service
-  continue de répondre 200, avec de mauvaises recommandations — les deux
-  premières ont été découvertes en comparant la réponse déployée à la réponse
-  locale, pas par une exception.
-\end{frame}
-
-\begin{frame}{Le service et l'application qui l'appelle}
-  \framesubtitle{2 minutes \textperiodcentered\ une seule source de vérité,
-    des copies générées}
-  \centering
-  \begin{tikzpicture}[every node/.style={font=\scriptsize, align=center, text=white},
-      bloc/.style={draw=primary, thick, rounded corners, text width=2.9cm,
-                   minimum height=1.3cm}]
-    \node[bloc, fill=primary, text width=5cm, minimum height=0.9cm] (art)
-      {Artefacts produits hors-ligne (ACP, ALS, SVD, fenêtres)};
-    \node[bloc, fill=accent,  below left=1cm and 0.6cm of art] (az)
-      {Azure Function\\+ Blob Storage\\\vspace{2pt}\textbf{architecture retenue}};
-    \node[bloc, fill=vert, below right=1cm and 0.6cm of art] (loc)
-      {Application locale\\qui l'appelle\\\vspace{2pt}interface de démonstration};
-    \draw[-{Latex[length=2mm]}, gris, thick] (art) -- (az);
-    \draw[-{Latex[length=2mm]}, gris, thick] (art) -- (loc);
-  \end{tikzpicture}
-
-  \vspace{0.6em}
-  \raggedright\scriptsize
-  \begin{itemize}\itemsep3pt
-    \item Les mêmes artefacts hors-ligne alimentent le service et l'application :
-          les copies déployées du cœur sont \textbf{générées} depuis \texttt{src/},
-          et la CI vérifie qu'elles sont à jour.
-    \item À l'inférence, aucune bibliothèque d'apprentissage : \pointfort{numpy
-          seul}. scikit-learn, implicit et Surprise ne servent qu'hors-ligne.
-    \item L'application ne calcule rien : elle appelle l'endpoint et affiche les
-          cinq identifiants — c'est bien \textbf{la Function} qui recommande.
-  \end{itemize}
-\end{frame}
-
-\begin{frame}{Architecture cible}
-  \framesubtitle{Absorber les nouveaux articles et les nouveaux lecteurs}
-  \centering
-  \begin{tikzpicture}[every node/.style={font=\tiny, align=center},
-      src/.style={draw=gris, thick, rounded corners, text width=1.9cm,
-                  minimum height=0.62cm, fill=clair, text=primary},
-      trt/.style={draw=accent, thick, rounded corners, text width=2.9cm,
-                  minimum height=0.62cm, fill=accent, text=white},
-      sto/.style={draw=accent2, thick, rounded corners, text width=2.3cm,
-                  minimum height=0.62cm, fill=accent2, text=white},
-      fl/.style={-{Latex[length=1.5mm]}, gris, thick}]
-
-    \node[src] (clic) {Clics des lecteurs};
-    \node[trt, right=4mm of clic] (ing) {Event Hub $\rightarrow$ Function d'ingestion};
-    \node[sto, right=4mm of ing]  (prof) {Store de profils};
-
-    \node[src, below=3.5mm of clic] (art)  {Nouvel article};
-    \node[trt, below=3.5mm of ing]  (proj) {Embedding $\rightarrow$ projection ACP persistée};
-    \node[sto, below=3.5mm of prof] (cat)  {Catalogue (Blob)};
-
-    \node[src, below=3.5mm of art]  (plan) {Planificateur};
-    \node[trt, below=3.5mm of proj] (als)  {Ré-entraînement ALS par lot};
-    \node[sto, below=3.5mm of cat]  (fact) {Facteurs versionnés};
-
-    \node[draw=primary, very thick, rounded corners, fill=primary, text=white,
-          text width=7.4cm, minimum height=0.75cm, below=7mm of als] (api)
-      {\textbf{API de recommandation dédiée} — architecture 1\\
-       mise à l'échelle \textperiodcentered\ cache \textperiodcentered\ versionnage
-       \textperiodcentered\ A/B};
-    \node[src, below=3.5mm of api, text width=2.6cm] (apps) {Applications clientes};
-
-    \draw[fl] (clic) -- (ing);  \draw[fl] (ing)  -- (prof);
-    \draw[fl] (art)  -- (proj); \draw[fl] (proj) -- (cat);
-    \draw[fl] (plan) -- (als);  \draw[fl] (als)  -- (fact);
-    \draw[fl] (prof.south) -- (api.north);
-    \draw[fl] (cat.south)  -- (api.north);
-    \draw[fl] (fact.south) -- (api.north);
+    \draw[fl] (clic) -- (ing); \draw[fl] (ing) -- (prof);
+    \draw[fl] (art) -- (proj); \draw[fl] (proj) -- (cat);
+    \draw[fl] (plan) -- (als); \draw[fl] (als) -- (fact);
+    \draw[flA] (prof.east) -- ++(0.35,0) |- (api.west);
+    \draw[flA] (cat.east) -- (api.west);
+    \draw[flS] (fact.east) -- ++(0.35,0) |- (api.west);
     \draw[fl] (api) -- (apps);
   \end{tikzpicture}
 
-  \vspace{0.5em}
-  \raggedright\scriptsize
-  \pointfort{Seule la ligne du bas impose un ré-entraînement.} Les deux besoins
-  immédiats — un article visible tout de suite, un lecteur servi dès son premier
-  clic — passent par les deux premières lignes, sans ré-apprentissage.
+  \vspace{0.1em}
+  {\small Article visible tout de suite, lecteur servi dès son premier clic : les deux premières voies, \pointfort{sans ré-apprentissage}.}
 \end{frame}
 
 % ═════════════════════ PARTIE 4 — Démonstration (2 min, 1 diapo) ══════════
-\begin{frame}{Partie 4 — Démonstration}
-  \framesubtitle{2 minutes \textperiodcentered\ six gestes}
-  \begin{enumerate}
-    \item Sélectionner un lecteur : 5 articles, avec étoiles et nombre de lecteurs.
-    \item Décocher « articles récents » : la liste change — \pointfort{l'effet
-          mesuré, en direct}.
-    \item Basculer sur « SVD Surprise » : autre classement, autre bibliothèque.
-    \item Parcourir le catalogue : cliquer un article hors des suggestions.
-    \item Inscrire un lecteur : il reçoit des recommandations immédiatement.
-    \item Le même appel sur Azure : 0,2 s, réponse identique au local.
-  \end{enumerate}
-  \aretenir{Les articles n'ont ni titre ni texte : le jeu de données est anonymisé
-    par sa source. L'interface affiche identifiant, catégorie, longueur, date et
-    note — les seules informations réelles disponibles.}
+\begin{frame}{Six gestes, deux minutes}
+  \framesubtitle{Démonstration}
+  \begin{columns}[T]
+    \begin{column}{0.48\textwidth}
+      \begin{enumerate}\itemsep6pt
+        \item Choisir un lecteur : 5 articles.
+        \item Décocher « récents » : la liste change.
+        \item Passer au SVD : autre classement.
+      \end{enumerate}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \begin{enumerate}\setcounter{enumi}{3}\itemsep6pt
+        \item Parcourir le catalogue.
+        \item Inscrire un lecteur : recommandé aussitôt.
+        \item Le même appel sur Azure : 0,2\,s.
+      \end{enumerate}
+    \end{column}
+  \end{columns}
+  \aretenir{Les articles n'ont ni titre ni texte : l'interface affiche l'identifiant, la catégorie, la longueur, la date et la note.}
 \end{frame}
 
-% ═══════════════════════════════════════════════════════════ Clôture ═══════
-{\setbeamercolor{background canvas}{bg=primary}
+% ═══════════════════════════════════════════════════════════ 22. Clôture ═══
+{\setbeamercolor{background canvas}{bg=ink}
 \begin{frame}[plain]
-  \vfill
-  {\color{white}\LARGE\bfseries La fraîcheur pèse plus que le modèle}\\[1em]
-  {\color{white!75!primary}\small
-   Facteur 42 sur la précision, mesuré sur la période de test.\\[0.4em]
-   Une place sur cinq accordée à la personnalisation ne coûte rien
-   et multiplie par 38 la part du catalogue exposée.}
-  \vfill
+  \begin{tikzpicture}[remember picture, overlay]
+    \begin{scope}[shift={(current page.south west)}]\ricochetB\end{scope}
+  \end{tikzpicture}
+  \vspace*{0.9em}
+  {\color{ricS}\ttfamily\scriptsize\addfontfeature{LetterSpace=8}CONCLUSION}\\[0.5em]
+  {\color{white}\fontsize{24}{27}\selectfont\fbold Le MVP fonctionne.\\ La suite : de vrais lecteurs.}
+  \par\vspace{1.6em}
+  \begin{tikzpicture}[every node/.append style={execute at begin node={\hyphenpenalty=10000\exhyphenpenalty=10000}}]
+    \node[anchor=north west, text width=3.9cm, align=left, inner sep=0] at (0,0)
+      {{\color{ricS}\ttfamily\scriptsize\addfontfeature{LetterSpace=6}LIVRÉ}\\[4pt]
+       {\color{white}\normalsize Un service serverless sur Azure qui renvoie cinq articles par lecteur.\\[5pt]
+        Une application, et le code sur GitHub.}};
+    \node[anchor=north west, text width=3.9cm, align=left, inner sep=0] at (4.7,0)
+      {{\color{ricS}\ttfamily\scriptsize\addfontfeature{LetterSpace=6}APPRIS}\\[4pt]
+       {\color{white}\normalsize La fraîcheur pèse plus que le modèle.\\[5pt]
+        Un score ne vaut que mesuré sur un découpage par date.}};
+    \node[anchor=north west, text width=3.9cm, align=left, inner sep=0] at (9.4,0)
+      {{\color{ricS}\ttfamily\scriptsize\addfontfeature{LetterSpace=6}ENSUITE}\\[4pt]
+       {\color{white}\normalsize Absorber en continu les nouveaux lecteurs et articles.\\[5pt]
+        Mesurer le taux de clic sur de vrais lecteurs.}};
+  \end{tikzpicture}
+  \vspace*{1.6em}
 \end{frame}}
 
 \end{document}
