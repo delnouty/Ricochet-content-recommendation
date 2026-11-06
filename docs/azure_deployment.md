@@ -364,8 +364,9 @@ demonstrate that the service works, not to show the product.
 | The Function's code | redo step 8 |
 | Shared code (`src/`) | `python scripts/sync_recommender.py` **before** step 8, otherwise the deployed copies stay stale |
 
-Freshness needs nothing further: it changes every hour, and it could not depend
-on restarting the service every hour (see `docs/architecture.md` § 3.a, "Two
+Freshness needs nothing further: it is meant to change every hour (in this MVP
+you re-upload it by hand, step 6; automating it is part of the target
+architecture), and it could not depend on restarting the service every hour (see `docs/architecture.md` § 3.a, "Two
 ways into Blob Storage").
 
 ### ⚠️ Replacing a heavy artifact: `restart` is not enough

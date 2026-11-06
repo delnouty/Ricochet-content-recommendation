@@ -64,7 +64,7 @@ flowchart LR
 
         subgraph blob[" Blob Storage — container <i>models</i> "]
             direction TB
-            hot["<b>Freshness</b> · 23 kB<br/>rebuilt hourly"]
+            hot["<b>Freshness</b> · 23 kB<br/>re-uploaded by hand (MVP)"]
             cold["<b>Model</b> · 253 MB<br/>rebuilt on training"]
         end
     end
@@ -103,7 +103,8 @@ every single call would pay for the download: about 8 s measured, against about
 200 ms today, a factor of 40.
 
 Rejecting it everywhere costs something else, though. The three **freshness**
-artifacts change every hour, and an in-memory cache is only refreshed by
+artifacts are meant to change every hour (in the MVP they are re-uploaded by
+hand; the timer Function is part of the target, §4.f), and an in-memory cache is only refreshed by
 `az functionapp restart` — the service would keep serving the window it started
 with, indefinitely. On those files the binding is exactly the right tool.
 
@@ -111,7 +112,7 @@ Hence the split that was kept:
 
 | Artifacts | Size | Cadence | Access | Cost per call |
 |---|---|---|---|---|
-| `popular_recent.npy`, `candidates_recent.npy`, `recent_window.json` | 23 kB | hourly | **blob input binding** | about 2 ms |
+| `popular_recent.npy`, `candidates_recent.npy`, `recent_window.json` | 23 kB | hourly in the target, by hand in the MVP | **blob input binding** | about 2 ms |
 | PCA catalogue, histories, stars, segmented popularity, factors | 253 MB | on re-training | SDK, then cached at cold start | 0 (cached) |
 
 The binding applies **after** the engine is initialised: `set_freshness()`

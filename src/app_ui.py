@@ -143,6 +143,99 @@ def get_ratings() -> tuple[np.ndarray | None, np.ndarray | None]:
 
 
 # ---------------------------------------------------------------------- affichage
+# Feuille de style commune aux trois hébergements : un thème posé par fichier
+# `.streamlit/config.toml` dépendrait du dossier d'où on lance l'application.
+# Palette = celle de la présentation et du site (index.html).
+_CSS = """
+<style>
+:root { --accent:#2447E8; --accent-fonce:#1B38C0; --signal:#E5533D;
+        --ligne:#DCE1EA; --gris:#56607A; --surface:#EEF1F6; }
+.block-container { max-width: 960px; padding-top: 2.4rem; }
+[data-testid="stSidebar"] { background: var(--surface); }
+
+/* Titre */
+.ric-titre { font-size: 2.1rem; font-weight: 700; letter-spacing: -.02em;
+             line-height: 1.1; margin: 0; }
+.ric-titre span { color: var(--accent); }
+.ric-sous-titre { color: var(--gris); margin: .25rem 0 1.4rem; }
+
+/* Chiffres clés de la barre latérale : taille réduite pour tenir dans la colonne.
+   (La couleur principale est fixée par le thème, .streamlit/config.toml.) */
+[data-testid="stMetricValue"] { font-size: 1.45rem; }
+[data-testid="stMetricLabel"] { color: var(--gris); }
+
+/* Fiche article */
+.ric-rang { font-size: 1.6rem; font-weight: 700; color: var(--accent);
+            line-height: 1; padding-top: .15rem; }
+.ric-titre-art { font-weight: 600; font-size: 1.02rem; }
+.ric-etoiles { color: #E0A100; letter-spacing: .06em; margin-left: .5rem; }
+.ric-etoiles.vide { color: #B9C0D0; }
+.ric-lecteurs { color: var(--gris); font-size: .85rem; margin-left: .35rem; }
+.ric-meta { color: var(--gris); font-size: .86rem; margin-top: .15rem; }
+.ric-lu { color: #1B7F4B; font-weight: 600; font-size: .85rem; }
+[data-testid="stVerticalBlockBorderWrapper"] { border-color: var(--ligne); }
+</style>
+"""
+
+
+def article_parts(article_id: int, meta: dict) -> dict:
+    """Éléments affichables d'un article, séparés pour une mise en page en fiche."""
+    stars, clicks = get_ratings()
+    n_stars = readers = None
+    if stars is not None and int(article_id) < stars.size:
+        n_stars = int(stars[int(article_id)])
+        if clicks is not None:
+            readers = int(clicks[int(article_id)])
+    entry = meta.get(int(article_id))
+    category = words = published = None
+    if entry:
+        category, words, created_ts = entry
+        published = datetime.fromtimestamp(created_ts / 1000,
+                                           tz=timezone.utc).strftime("%d/%m/%Y")
+    return {"stars": n_stars, "readers": readers, "category": category,
+            "words": words, "published": published}
+
+
+def article_card(article_id: int, meta: dict, key: str, rank: int | None = None,
+                 can_mark: bool = True, already_read: bool = False) -> bool:
+    """Fiche d'un article : rang, titre, note, détails, bouton « Lu ».
+
+    Renvoie vrai si l'utilisateur a cliqué sur « Lu ».
+    """
+    p = article_parts(int(article_id), meta)
+    if p["stars"]:
+        note = f'<span class="ric-etoiles">{"★" * p["stars"]}</span>'
+        if p["readers"] is not None:
+            note += (f'<span class="ric-lecteurs">'
+                     f'{p["readers"]:,} lecteurs</span>'.replace(",", " "))
+    elif p["stars"] == 0:
+        note = '<span class="ric-etoiles vide">☆</span><span class="ric-lecteurs">' \
+               "jamais lu</span>"
+    else:
+        note = ""
+    details = [f"Catégorie {p['category']}"] if p["category"] is not None else []
+    if p["words"] is not None:
+        details.append(f"{p['words']} mots")
+    if p["published"]:
+        details.append(f"publié le {p['published']}")
+    lu = ' <span class="ric-lu">✓ déjà lu</span>' if already_read else ""
+
+    clicked = False
+    with st.container(border=True):
+        cols = st.columns([0.45, 7.3, 1.25], vertical_alignment="center")
+        cols[0].markdown(f'<div class="ric-rang">{rank if rank else "•"}</div>',
+                         unsafe_allow_html=True)
+        cols[1].markdown(
+            f'<div class="ric-titre-art">Article #{int(article_id)}{note}{lu}</div>'
+            f'<div class="ric-meta">{" · ".join(details)}</div>',
+            unsafe_allow_html=True)
+        if can_mark:
+            clicked = cols[2].button("Lu", key=key, disabled=already_read,
+                                     use_container_width=True,
+                                     help="Enregistrer cette lecture et affiner le profil")
+    return clicked
+
+
 def describe(article_id: int, meta: dict) -> str:
     stars, clicks = get_ratings()
 
@@ -286,7 +379,7 @@ def view_recommendations(reco: Recommender, store: UserStore, meta: dict) -> Non
                             format_func=lambda m: STRATEGIES[m])
     n = col2.slider("Nombre d'articles", 1, 10, 5)
 
-    # La fraîcheur est le levier le plus fort mesuré (facteur 250 sur la précision) :
+    # La fraîcheur est le levier le plus fort mesuré (facteur 42 : fenêtre de 1 h contre 240 h) :
     # elle est donc active par défaut, mais reste débrayable pour comparer.
     fenetre = reco.recent_window.get("window_hours_effective")
     if reco.popular_recent.size:
@@ -359,16 +452,21 @@ def view_recommendations(reco: Recommender, store: UserStore, meta: dict) -> Non
         return
 
     latence = getattr(reco, "derniere_latence_ms", None)
-    detail = f" — {latence:.0f} ms" if latence else ""
-    st.markdown(f"**{len(recs)} article(s) recommandé(s)** — "
-                f"{'popularité (cold start)' if not history else method}{detail}")
+    if latence:
+        detail = (f" · {latence / 1000:.1f} s".replace(".", ",") if latence >= 1000
+                  else f" · {latence:.0f} ms")
+    else:
+        detail = ""
+    origine = ("popularité (cold start)" if not history
+               else STRATEGIES.get(method, method).split(" — ")[0])
+    pluriel = "s" if len(recs) > 1 else ""
+    st.markdown(f"**{len(recs)} article{pluriel} recommandé{pluriel}** · "
+                f"{origine}{detail}")
 
     is_client = store.name_of(user_id) is not None
     for rank, article_id in enumerate(recs, start=1):
-        row = st.columns([6, 1])
-        row[0].markdown(f"**{rank}.** {describe(int(article_id), meta)}")
-        if is_client and row[1].button("Lu", key=f"read-{user_id}-{article_id}",
-                                       help="Enregistrer cette lecture et affiner le profil"):
+        if article_card(int(article_id), meta, key=f"read-{user_id}-{article_id}",
+                        rank=rank, can_mark=is_client):
             store.add_read(user_id, int(article_id))
             sync_store_into_model(reco, store)
             st.rerun()
@@ -426,7 +524,8 @@ def view_browse(reco: Recommender, store: UserStore, meta: dict) -> None:
 
     PAGE_SIZE = 20
     pages = max(1, (len(articles) + PAGE_SIZE - 1) // PAGE_SIZE)
-    page = st.number_input(f"Page (sur {pages:,})", min_value=1, max_value=pages,
+    page = st.number_input(f"Page (sur {pages:,})".replace(",", " "),
+                           min_value=1, max_value=pages,
                            value=1, step=1, key="browse_page")
     start = (int(page) - 1) * PAGE_SIZE
     shown = articles[start:start + PAGE_SIZE]
@@ -434,12 +533,9 @@ def view_browse(reco: Recommender, store: UserStore, meta: dict) -> None:
     st.caption(f"{len(articles):,} article(s) — affichage {start + 1}–"
                f"{start + len(shown)}. Cliquez « Lu » sur ce que le client a lu.")
 
-    for article_id in shown:
-        row = st.columns([6, 1])
-        read_marker = " ✓" if article_id in already_read else ""
-        row[0].markdown(f"{describe(article_id, meta)}{read_marker}")
-        if row[1].button("Lu", key=f"browse-{user_id}-{article_id}",
-                         disabled=article_id in already_read):
+    for position, article_id in enumerate(shown, start=start + 1):
+        if article_card(article_id, meta, key=f"browse-{user_id}-{article_id}",
+                        rank=position, already_read=article_id in already_read):
             store.add_read(user_id, article_id)
             sync_store_into_model(reco, store)
             st.rerun()
@@ -462,8 +558,10 @@ def run(models_dir, clients_db, banniere: str | None = None,
     _CTX["store"] = store
 
     st.set_page_config(page_title="Ricochet — recommandation d'articles", page_icon="🎯")
-    st.title("🎯 Ricochet — recommandation d'articles")
-    st.caption("Suggère des articles à un lecteur à partir de ce qu'il a déjà lu.")
+    st.markdown(_CSS, unsafe_allow_html=True)
+    st.markdown('<h1 class="ric-titre">Ricochet<span>.</span></h1>'
+                '<div class="ric-sous-titre">Cinq articles pour chaque lecteur, '
+                "à partir de ce qu'il a déjà lu.</div>", unsafe_allow_html=True)
 
     if banniere:
         st.warning(banniere)
@@ -483,54 +581,56 @@ def run(models_dir, clients_db, banniere: str | None = None,
 
     with st.sidebar:
         st.header("Système")
-        # Le moteur peut être un mandataire HTTP (`app/api_client.ApiRecommender`,
-        # solution Azure) : affirmer « aucun service externe » serait alors faux,
-        # et contredirait la bannière affichée juste au-dessus.
-        service = getattr(reco, "url", None)
-        if service:
-            hote = service.split("/api/")[0]
-            # Formulation choisie pour lever une ambiguïté réelle : dire « aucun
-            # modèle ici » se lit facilement comme « aucun modèle nulle part ».
-            # Le modèle existe bel et bien — il est chargé par le service, pas
-            # par cette application.
-            st.caption(f"Le modèle est chargé et exécuté par le **service** "
-                       f"`{hote}`. Cette application ne le contient pas : elle "
-                       "lui envoie la requête et affiche la réponse.")
-            latence = getattr(reco, "derniere_latence_ms", None)
-            if latence is not None:
-                st.caption(f"Dernier appel : {latence:.0f} ms")
-            st.caption(f"Artefacts d'**affichage** : `{models_dir}` "
-                       "(notes, historiques, métadonnées — pas les embeddings)")
-        else:
-            st.caption("Exécution locale : modèle chargé dans ce processus, "
-                       "aucun service externe.")
-            st.caption(f"Artefacts : `{models_dir}`")
-        st.caption(f"Catalogue : {reco.n_articles:,} articles")
-        st.caption(f"Clients inscrits : {len(store.list_clients())}")
-        st.caption(f"Utilisateurs du jeu de données : "
-                   f"{len(reco.user_clicks) - len(store.list_clients()):,}")
-        st.caption(f"ALS (implicit) : {'disponible' if reco._has_cf else 'absent'}")
-        st.caption(f"SVD (Surprise) : {'disponible' if reco._has_svd else 'absent'}")
-        st.caption(f"Métadonnées : {'chargées' if meta else 'non trouvées'}")
-        # La fenêtre peut manquer alors que le vivier est là (artefacts publiés
-        # sans `recent_window.json`) : on affiche alors le vivier sans la durée.
-        fenetre = reco.recent_window.get("window_hours_effective")
-        if reco.popular_recent.size:
-            duree = f", fenêtre {fenetre:g} h" if fenetre else ""
-            st.caption(f"Fraîcheur : {reco.popular_recent.size:,} articles{duree}"
-                       .replace(",", " "))
-        else:
-            st.caption("Fraîcheur : artefact absent — tout le catalogue")
-        _stars, _ = get_ratings()
-        st.caption("Notes ★ : "
-                   + (f"{int((_stars > 0).sum()):,} articles notés".replace(",", " ")
-                      if _stars is not None else "artefact absent"))
-        origine = getattr(store, "db_path", None)
-        if origine is None:
-            st.caption(f"Clients : Azure Table Storage "
-                       f"(`{getattr(store, 'nom_clients', 'table')}`)")
-        else:
-            st.caption(f"Clients : SQLite `{origine}`")
+        n_clients = len(store.list_clients())
+        st.metric("Articles au catalogue", f"{reco.n_articles:,}".replace(",", " "))
+        st.metric("Utilisateurs du jeu de données",
+                  f"{len(reco.user_clicks) - n_clients:,}".replace(",", " "))
+        st.metric("Clients inscrits", n_clients)
+        with st.expander("Détails techniques"):
+            # Le moteur peut être un mandataire HTTP (`app/api_client.ApiRecommender`,
+            # solution Azure) : affirmer « aucun service externe » serait alors faux,
+            # et contredirait la bannière affichée juste au-dessus.
+            service = getattr(reco, "url", None)
+            if service:
+                hote = service.split("/api/")[0]
+                # Formulation choisie pour lever une ambiguïté réelle : dire « aucun
+                # modèle ici » se lit facilement comme « aucun modèle nulle part ».
+                # Le modèle existe bel et bien — il est chargé par le service, pas
+                # par cette application.
+                st.caption(f"Le modèle est chargé et exécuté par le **service** "
+                           f"`{hote}`. Cette application ne le contient pas : elle "
+                           "lui envoie la requête et affiche la réponse.")
+                latence = getattr(reco, "derniere_latence_ms", None)
+                if latence is not None:
+                    st.caption(f"Dernier appel : {latence:.0f} ms")
+                st.caption(f"Artefacts d'**affichage** : `{models_dir}` "
+                           "(notes, historiques, métadonnées — pas les embeddings)")
+            else:
+                st.caption("Exécution locale : modèle chargé dans ce processus, "
+                           "aucun service externe.")
+                st.caption(f"Artefacts : `{models_dir}`")
+            st.caption(f"ALS (implicit) : {'disponible' if reco._has_cf else 'absent'}")
+            st.caption(f"SVD (Surprise) : {'disponible' if reco._has_svd else 'absent'}")
+            st.caption(f"Métadonnées : {'chargées' if meta else 'non trouvées'}")
+            # La fenêtre peut manquer alors que le vivier est là (artefacts publiés
+            # sans `recent_window.json`) : on affiche alors le vivier sans la durée.
+            fenetre = reco.recent_window.get("window_hours_effective")
+            if reco.popular_recent.size:
+                duree = f", fenêtre {fenetre:g} h" if fenetre else ""
+                st.caption(f"Fraîcheur : {reco.popular_recent.size:,} articles{duree}"
+                           .replace(",", " "))
+            else:
+                st.caption("Fraîcheur : artefact absent — tout le catalogue")
+            _stars, _ = get_ratings()
+            st.caption("Notes ★ : "
+                       + (f"{int((_stars > 0).sum()):,} articles notés".replace(",", " ")
+                          if _stars is not None else "artefact absent"))
+            origine = getattr(store, "db_path", None)
+            if origine is None:
+                st.caption(f"Clients : Azure Table Storage "
+                           f"(`{getattr(store, 'nom_clients', 'table')}`)")
+            else:
+                st.caption(f"Clients : SQLite `{origine}`")
 
     tab_reco, tab_browse, tab_new = st.tabs(
         ["Recommandations", "Parcourir les articles", "Nouveau client"])

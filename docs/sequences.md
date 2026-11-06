@@ -173,7 +173,7 @@ sequenceDiagram
 
 **What this diagram shows**: the two ways into Blob Storage, and why they are not
 in the same place. The 23 kB of freshness go through *bindings* that are re-read
-on every call, so a new hourly window applies **without a restart**. The 253 MB
+on every call, so a newly uploaded window applies **without a restart**. The 253 MB
 go through the SDK with a cache: a binding there would cost 8 s per call instead
 of 0.2 s.
 

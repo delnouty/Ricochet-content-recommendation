@@ -118,8 +118,9 @@ class Recommender:
                       window: dict | None = None) -> None:
         """Remplace les artefacts de fraîcheur par ceux fournis par l'appelant.
 
-        Les trois artefacts de fraîcheur (23 Ko au total) sont recalculés toutes les
-        heures, alors que le catalogue et les historiques (109 Mo) changent rarement.
+        Les trois artefacts de fraîcheur (23 Ko au total) sont conçus pour être
+        recalculés toutes les heures (dans le MVP, le dépôt dans Blob se fait à la
+        main ; une Function à minuterie est prévue dans l'architecture cible), alors que le catalogue et les historiques (109 Mo) changent rarement.
         Les charger une fois au démarrage, comme le reste, revient à servir une
         fenêtre périmée jusqu'au prochain redémarrage du service.
 
@@ -327,17 +328,20 @@ class Recommender:
              fresh_only: bool = True) -> list[int] | None:
         """Stratégie retenue en production : popularité récente + une place au contenu.
 
-        Composition mesurée sur validation puis confirmée sur test :
+        Composition mesurée sur la période de **test** (`models/baseline_metrics.json`) :
 
-            5 places popularité        HitRate@5 0,2190 | couverture 0,004 %
-            4 popularité + 1 contenu   HitRate@5 0,2190 | couverture 0,130 %
-            3 popularité + 2 contenu   HitRate@5 0,2100 | couverture 0,194 %
+            5 places popularité        HitRate@5 0,2525 | couverture 0,003 %
+            4 popularité + 1 contenu   HitRate@5 0,2500 | couverture 0,116 %
 
-        La première place donnée au contenu **ne coûte rien** en précision et
-        multiplie la couverture du catalogue par 32 ; la deuxième coûte 4 %. Une
-        place donnée à l'ALS, elle, coûte 3,7 % pour un gain de couverture neuf fois
-        plus faible — d'où son absence ici (les facteurs ALS et SVD restent
-        disponibles via les stratégies `collab` et `svd`, mais ne sont pas servis).
+        La première place donnée au contenu coûte environ 1 % de précision et
+        multiplie la couverture du catalogue par 38.
+
+        Le choix du nombre de places a été arrêté sur la période de **validation**
+        (HitRate@5 / couverture : 5 pop. 0,2190 / 0,004 % ; 4+1 0,2190 / 0,130 % ;
+        3+2 0,2100 / 0,194 %) : la deuxième place coûte alors 4 %. Une place donnée à
+        l'ALS, elle, coûte 3,7 % pour un gain de couverture neuf fois plus faible —
+        d'où son absence ici (les facteurs ALS et SVD restent disponibles via les
+        stratégies `collab` et `svd`, mais ne sont pas servis).
         """
         places_popularite = max(0, n - places_contenu)
 
