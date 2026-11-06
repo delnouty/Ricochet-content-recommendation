@@ -10,7 +10,8 @@ légers, chargés ensuite par `Recommender` (et par l'Azure Function) :
   - user_clicks.pkl             : dict user_id -> np.ndarray des article_id lus ;
   - popular_articles.npy        : article_id triés par popularité (tout l'historique) ;
   - popular_recent.npy          : popularité sur **fenêtre courte** (1 h) — le levier
-    le plus fort du projet (facteur 250 sur la précision) ;
+    le plus fort du projet (facteur 42 sur la précision face à une fenêtre de 240 h,
+    voir `models/freshness_sweep.json`) ;
   - candidates_recent.npy       : vivier de candidats sur fenêtre plus large (6 h),
     utilisé par les stratégies personnalisées ;
   - recent_window.json          : bornes des deux fenêtres, pour dater le classement ;
@@ -171,12 +172,17 @@ def build_recent_popularity(clicks: pd.DataFrame, out_dir: Path,
                             min_articles: int = 200) -> np.ndarray:
     """Popularité sur une **fenêtre glissante**, et vivier d'articles frais.
 
-    C'est le levier le plus fort du projet, mesuré sur découpage temporel :
+    C'est le levier le plus fort du projet, mesuré sur découpage temporel. Deux
+    comparaisons, qui ne mesurent pas la même chose :
 
-        popularité sur tout l'historique  ->  HitRate@5 = 0,0010
+        popularité sur tout l'historique  ->  HitRate@5 = 0,0010  (facteur 250)
+        popularité sur 240 h              ->  HitRate@5 = 0,0060  (facteur 42)
         popularité sur la dernière heure  ->  HitRate@5 = 0,2525
 
-    Un facteur 250 sans changer d'algorithme. La raison : 48 % des articles lus
+    Le facteur 42 (`models/freshness_sweep.json`) compare la fenêtre de 1 h à la plus
+    longue fenêtre mesurée, 240 h ; le facteur 250 la compare à un classement sur
+    tout l'historique, sans fenêtre. Dans les deux cas, sans changer d'algorithme.
+    La raison : 48 % des articles lus
     pendant la période évaluée n'existaient pas encore pendant l'entraînement. Un
     classement sur tout l'historique noie les nouveautés ; une fenêtre courte les
     capte.
@@ -189,7 +195,8 @@ def build_recent_popularity(clicks: pd.DataFrame, out_dir: Path,
         date le classement servi.
 
     ⚠️ Un artefact de fraîcheur périme. Servi deux jours plus tard, il redescend à
-    0,0000 — mesuré. En production, la fenêtre se recalcule à intervalle régulier
+    0,0000 — mesuré. Dans le MVP, la fenêtre est recalculée et redéposée dans Blob
+    à la main ; une Function à minuterie est prévue dans l'architecture cible
     (§4.f de docs/architecture.md).
     """
     import json
@@ -219,7 +226,8 @@ def build_recent_popularity(clicks: pd.DataFrame, out_dir: Path,
 
     # Seconde fenêtre, plus large : le **vivier de candidats** des stratégies
     # personnalisées. Les deux optima mesurés diffèrent — 1 h pour le classement
-    # par popularité (0,2190), 6 h pour le contenu (0,0405, contre 0,0255 sur 1 h) :
+    # par popularité (0,2190), 6 h pour le contenu (0,0405, contre 0,0255 sur 1 h ;
+    # relevés de validation) :
     # une fenêtre étroite prive le contenu de candidats à départager.
     heures_vivier = max(heures, candidate_hours)
     vivier_clics = clicks[(horodatages >= ancre - heures_vivier * 3600 * 1000)

@@ -590,7 +590,7 @@
   </div>
 
   <h3>Two ways in, not one</h3>
-  <p>The binding re-reads its blob on every call. That is exactly right for 23 KB that change every hour. Applied to 253 MB it would throw the cache away and pay for the download each time.</p>
+  <p>The binding re-reads its blob on every call. That is exactly right for 23 KB that are meant to be refreshed every hour. Applied to 253 MB it would throw the cache away and pay for the download each time.</p>
   <div class="cmp" role="img" aria-label="Per call: 0.2 seconds with the cache, 8 seconds if the binding carried the 253 MB">
     <div class="row fast"><span>Cached heavy artifacts</span><div class="track"><i></i></div><b>0.2 s</b></div>
     <div class="row slow"><span>Binding on 253 MB</span><div class="track"><i></i></div><b>8 s</b></div>

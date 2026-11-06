@@ -114,7 +114,7 @@ class _Handler(BaseHTTPRequestHandler):
             return self._json(400, {"error": "'region' doit être un entier"})
 
 
-        # Fraîcheur : le levier le plus fort du projet (facteur 250 sur la précision).
+        # Fraîcheur : le levier le plus fort du projet (facteur 42 : fenêtre de 1 h contre 240 h).
         # Exposé en paramètre pour que le client puisse démontrer l'écart, mais activé
         # par défaut — c'est la configuration servie en production.
         raw_fresh = params.get("fresh_only")

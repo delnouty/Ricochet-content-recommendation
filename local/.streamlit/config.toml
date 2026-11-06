@@ -1,0 +1,9 @@
+# Thème Ricochet : palette de la présentation et du site (index.html).
+# Streamlit lit ce fichier dans le dossier d'où on lance l'application ;
+# la même copie existe à la racine, dans local/ et dans spaces/.
+[theme]
+base = "light"
+primaryColor = "#2447E8"
+backgroundColor = "#F7F8FA"
+secondaryBackgroundColor = "#EEF1F6"
+textColor = "#0E1530"

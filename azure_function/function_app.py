@@ -22,8 +22,9 @@ Deux accès à Blob Storage, chacun là où il est le meilleur
 
 **Blob storage input binding** pour les trois artefacts de *fraîcheur*
 (`popular_recent.npy`, `candidates_recent.npy`, `recent_window.json` — 23 Ko au
-total). Ils sont recalculés toutes les heures, et le binding les relit à chaque
-invocation : le service prend donc en compte une nouvelle fenêtre **sans
+total). Ils sont conçus pour être recalculés toutes les heures (dans le MVP, le
+dépôt dans Blob se fait à la main ; une Function à minuterie est prévue dans
+l'architecture cible), et le binding les relit à chaque invocation : le service prend donc en compte une nouvelle fenêtre **sans
 redémarrage**. Coût mesuré : ~2 ms par appel.
 
 **SDK avec cache au démarrage à froid** pour les artefacts lourds (catalogue
@@ -136,7 +137,8 @@ def recommend(req: func.HttpRequest, popular_recent: func.InputStream,
 
 
     # Fraîcheur : le levier le plus fort du projet (facteur 42 sur la précision,
-    # mesuré sur la période de test — voir models/freshness_sweep.json).
+    # fenêtre de 1 h contre 240 h, mesuré sur la période de test — voir
+    # models/freshness_sweep.json).
     # Exposé en paramètre pour que le client puisse démontrer l'écart, mais activé
     # par défaut — c'est la configuration servie en production.
     raw_fresh = _param(req, "fresh_only", body)
